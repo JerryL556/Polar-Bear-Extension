@@ -22,11 +22,38 @@
     feedingChance: 0.18,
     feedingDurationMs: 10000,
     appleDropPadding: 64,
-    chaosThreshold: 30,
-    chaosChancePerCheck: 0.18,
-    chaosDurationMs: 5000,
-    chaosTargetRatio: 0.5,
-    chaosMinTargets: 10,
+    chaosLevels: {
+      level1: {
+        minHappiness: 21,
+        maxHappiness: 40,
+        chancePerCheck: 0.1,
+        durationMs: 5000,
+        targetRatio: 0.25,
+        minTargets: 4,
+        minFlickerMs: 1000,
+        maxFlickerMs: 2500
+      },
+      level2: {
+        minHappiness: 1,
+        maxHappiness: 20,
+        chancePerCheck: 0.18,
+        durationMs: 8000,
+        targetRatio: 0.5,
+        minTargets: 10,
+        minFlickerMs: 2000,
+        maxFlickerMs: 6000
+      },
+      level3: {
+        minHappiness: 0,
+        maxHappiness: 0,
+        chancePerCheck: 0.35,
+        durationMs: 11000,
+        targetRatio: 0.8,
+        minTargets: 16,
+        minFlickerMs: 3500,
+        maxFlickerMs: 9000
+      }
+    },
     chaosPhrases: [
       "NEED APPLE",
       "THE END IS NEVER"
@@ -242,7 +269,8 @@
     pointerY: 0,
     chaosActive: false,
     chaosTimeoutId: null,
-    chaosRestorers: []
+    chaosRestorers: [],
+    chaosTimers: []
   };
 
   const getMood = () => {
@@ -401,6 +429,13 @@
     }
   };
 
+  const clearChaosTimers = () => {
+    for (const timerId of state.chaosTimers) {
+      window.clearTimeout(timerId);
+    }
+    state.chaosTimers = [];
+  };
+
   const buildChaosText = (targetLength) => {
     const phrase = CONFIG.chaosPhrases[Math.floor(Math.random() * CONFIG.chaosPhrases.length)];
     if (targetLength <= 0) {
@@ -431,7 +466,20 @@
     return element.getClientRects().length > 0;
   };
 
-  const collectChaosTargets = () => {
+  const getChaosLevelConfig = () => {
+    if (state.happiness === 0) {
+      return CONFIG.chaosLevels.level3;
+    }
+    if (state.happiness <= 20) {
+      return CONFIG.chaosLevels.level2;
+    }
+    if (state.happiness <= 40) {
+      return CONFIG.chaosLevels.level1;
+    }
+    return null;
+  };
+
+  const collectChaosTargets = (chaosConfig) => {
     const targets = [];
     const seen = new Set();
     const selectors = [
@@ -455,6 +503,27 @@
 
       targets.push({ kind: "input", node: input, text: sourceText });
       seen.add(input);
+    }
+
+    for (const image of document.querySelectorAll("img")) {
+      if (!isVisibleElement(image) || image === apple || host.contains(image)) {
+        continue;
+      }
+
+      const rect = image.getBoundingClientRect();
+      if (rect.width < 24 || rect.height < 24) {
+        continue;
+      }
+
+      if (!image.currentSrc && !image.src) {
+        continue;
+      }
+
+      targets.push({
+        kind: "image",
+        node: image
+      });
+      seen.add(image);
     }
 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
@@ -507,8 +576,8 @@
     }
 
     const targetCount = clamp(
-      Math.ceil(targets.length * CONFIG.chaosTargetRatio),
-      Math.min(CONFIG.chaosMinTargets, targets.length),
+      Math.ceil(targets.length * chaosConfig.targetRatio),
+      Math.min(chaosConfig.minTargets, targets.length),
       targets.length
     );
 
@@ -517,6 +586,7 @@
 
   const restoreChaos = () => {
     clearChaosTimeout();
+    clearChaosTimers();
     for (const restore of state.chaosRestorers) {
       restore();
     }
@@ -524,58 +594,178 @@
     state.chaosActive = false;
   };
 
+  const registerChaosRestorer = (restore) => {
+    let restored = false;
+    const wrappedRestore = () => {
+      if (restored) {
+        return;
+      }
+      restored = true;
+      restore();
+    };
+
+    state.chaosRestorers.push(wrappedRestore);
+    return wrappedRestore;
+  };
+
+  const scheduleChaosTimer = (callback, delayMs) => {
+    const timerId = window.setTimeout(() => {
+      state.chaosTimers = state.chaosTimers.filter((id) => id !== timerId);
+      callback();
+    }, delayMs);
+
+    state.chaosTimers.push(timerId);
+  };
+
+  const createChaosMutation = (target) => {
+    if (target.kind === "input") {
+      const input = target.node;
+      const originalValue = input.value;
+      const originalPlaceholder = input.placeholder;
+      const useValue = originalValue.trim().length > 0;
+      const replacement = buildChaosText((useValue ? originalValue : originalPlaceholder).length);
+
+      return {
+        apply() {
+          if (!input.isConnected) {
+            return;
+          }
+          if (useValue) {
+            input.value = replacement;
+          } else {
+            input.placeholder = replacement;
+          }
+        },
+        restore() {
+          if (!input.isConnected) {
+            return;
+          }
+          input.value = originalValue;
+          input.placeholder = originalPlaceholder;
+        }
+      };
+    }
+
+    if (target.kind === "image") {
+      const image = target.node;
+      const rect = image.getBoundingClientRect();
+      const originalSrc = image.getAttribute("src");
+      const originalSrcset = image.getAttribute("srcset");
+      const originalSizes = image.getAttribute("sizes");
+      const originalWidth = image.style.width;
+      const originalHeight = image.style.height;
+      const originalObjectFit = image.style.objectFit;
+
+      return {
+        apply() {
+          if (!image.isConnected) {
+            return;
+          }
+          image.style.width = `${Math.round(rect.width)}px`;
+          image.style.height = `${Math.round(rect.height)}px`;
+          image.style.objectFit = "contain";
+          image.setAttribute("src", appleUrl);
+          image.removeAttribute("srcset");
+          image.removeAttribute("sizes");
+        },
+        restore() {
+          if (!image.isConnected) {
+            return;
+          }
+
+          if (originalSrc === null) {
+            image.removeAttribute("src");
+          } else {
+            image.setAttribute("src", originalSrc);
+          }
+
+          if (originalSrcset === null) {
+            image.removeAttribute("srcset");
+          } else {
+            image.setAttribute("srcset", originalSrcset);
+          }
+
+          if (originalSizes === null) {
+            image.removeAttribute("sizes");
+          } else {
+            image.setAttribute("sizes", originalSizes);
+          }
+
+          image.style.width = originalWidth;
+          image.style.height = originalHeight;
+          image.style.objectFit = originalObjectFit;
+        }
+      };
+    }
+
+    const textNode = target.node;
+    const originalText = textNode.textContent ?? "";
+
+    return {
+      apply() {
+        if (!textNode.isConnected) {
+          return;
+        }
+        textNode.textContent = buildChaosText(originalText.length);
+      },
+      restore() {
+        if (!textNode.isConnected) {
+          return;
+        }
+        textNode.textContent = originalText;
+      }
+    };
+  };
+
   const triggerChaos = () => {
     if (state.chaosActive) {
       return;
     }
 
-    const targets = collectChaosTargets();
+    const chaosConfig = getChaosLevelConfig();
+    if (!chaosConfig) {
+      return;
+    }
+
+    const targets = collectChaosTargets(chaosConfig);
     if (targets.length === 0) {
       return;
     }
 
     state.chaosActive = true;
     state.chaosRestorers = [];
+    state.chaosTimers = [];
 
     for (const target of targets) {
-      if (target.kind === "input") {
-        const input = target.node;
-        const originalValue = input.value;
-        const originalPlaceholder = input.placeholder;
-        const useValue = originalValue.trim().length > 0;
-        const replacement = buildChaosText((useValue ? originalValue : originalPlaceholder).length);
+      const mutation = createChaosMutation(target);
+      const restore = registerChaosRestorer(mutation.restore);
+      const latestStart = Math.max(0, chaosConfig.durationMs - chaosConfig.minFlickerMs);
+      const startDelay = Math.floor(Math.random() * (latestStart + 1));
+      const maxVisibleDuration = Math.min(
+        chaosConfig.maxFlickerMs,
+        chaosConfig.durationMs - startDelay
+      );
+      const minVisibleDuration = Math.min(chaosConfig.minFlickerMs, maxVisibleDuration);
+      const visibleDuration = minVisibleDuration + Math.floor(
+        Math.random() * Math.max(1, maxVisibleDuration - minVisibleDuration + 1)
+      );
 
-        if (useValue) {
-          input.value = replacement;
-        } else {
-          input.placeholder = replacement;
+      scheduleChaosTimer(() => {
+        if (!state.chaosActive) {
+          return;
         }
+        mutation.apply();
+      }, startDelay);
 
-        state.chaosRestorers.push(() => {
-          if (!input.isConnected) {
-            return;
-          }
-          input.value = originalValue;
-          input.placeholder = originalPlaceholder;
-        });
-      } else {
-        const textNode = target.node;
-        const originalText = textNode.textContent ?? "";
-        textNode.textContent = buildChaosText(originalText.length);
-
-        state.chaosRestorers.push(() => {
-          if (!textNode.isConnected) {
-            return;
-          }
-          textNode.textContent = originalText;
-        });
-      }
+      scheduleChaosTimer(() => {
+        restore();
+      }, startDelay + visibleDuration);
     }
 
     clearChaosTimeout();
     state.chaosTimeoutId = window.setTimeout(() => {
       restoreChaos();
-    }, CONFIG.chaosDurationMs);
+    }, chaosConfig.durationMs);
   };
 
   const endFeeding = () => {
@@ -679,10 +869,11 @@
       : CONFIG.decayPerTick;
     setHappiness(state.happiness - decay);
 
+    const chaosConfig = getChaosLevelConfig();
     if (
-      state.happiness < CONFIG.chaosThreshold &&
+      chaosConfig &&
       !state.chaosActive &&
-      Math.random() < CONFIG.chaosChancePerCheck
+      Math.random() < chaosConfig.chancePerCheck
     ) {
       triggerChaos();
     }
