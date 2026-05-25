@@ -21,6 +21,8 @@
     idleChance: 0.22,
     feedingChance: 0.18,
     feedingDurationMs: 10000,
+    feedingMinCooldownMs: 10000,
+    feedingExtraCooldownMs: 18000,
     appleDropPadding: 64,
     chaosLevels: {
       level1: {
@@ -31,7 +33,11 @@
         targetRatio: 0.25,
         minTargets: 4,
         minFlickerMs: 1000,
-        maxFlickerMs: 2500
+        maxFlickerMs: 2500,
+        phrases: [
+          "ARE YOU THERE?",
+          "FEED ME!"
+        ]
       },
       level2: {
         minHappiness: 1,
@@ -41,7 +47,13 @@
         targetRatio: 0.5,
         minTargets: 10,
         minFlickerMs: 2000,
-        maxFlickerMs: 6000
+        maxFlickerMs: 6000,
+        phrases: [
+          "NEED APPLE",
+          "THE END IS NEVER",
+          "FEED ME!",
+          "LOOK AT ME"
+        ]
       },
       level3: {
         minHappiness: 0,
@@ -51,12 +63,18 @@
         targetRatio: 0.8,
         minTargets: 16,
         minFlickerMs: 3500,
-        maxFlickerMs: 9000
+        maxFlickerMs: 9000,
+        phrases: [
+          "LOOK AT ME",
+          "STARVING HUNGER"
+        ]
       }
     },
-    chaosPhrases: [
-      "NEED APPLE",
-      "THE END IS NEVER"
+    chaosShortPhrases: [
+      "HELLO??",
+      "APPLE!!",
+      "HELP!!",
+      "ANYONE??"
     ]
   };
 
@@ -235,6 +253,7 @@
   `;
 
   const appleUrl = chrome.runtime.getURL("apple.webp");
+  const rottenAppleUrl = chrome.runtime.getURL("rotten-apple.png");
   const shell = shadow.querySelector(".pet-shell");
   const pet = shadow.querySelector(".pet");
   const petVisual = shadow.querySelector(".pet-visual");
@@ -262,6 +281,7 @@
     appleX: 0,
     appleY: 0,
     draggingApple: false,
+    nextFeedingAllowedAt: performance.now() + CONFIG.feedingMinCooldownMs + Math.random() * CONFIG.feedingExtraCooldownMs,
     activePointerId: null,
     dragOffsetX: 0,
     dragOffsetY: 0,
@@ -436,8 +456,15 @@
     state.chaosTimers = [];
   };
 
-  const buildChaosText = (targetLength) => {
-    const phrase = CONFIG.chaosPhrases[Math.floor(Math.random() * CONFIG.chaosPhrases.length)];
+  const buildChaosText = (targetLength, chaosConfig) => {
+    const phrases = chaosConfig?.phrases ?? CONFIG.chaosLevels.level2.phrases;
+    const shortPhrases = CONFIG.chaosShortPhrases;
+    const shortestMainPhraseLength = Math.min(...phrases.map((phrase) => phrase.length));
+    const phrasePool = targetLength > 0 && targetLength < shortestMainPhraseLength
+      ? shortPhrases
+      : phrases;
+    const phrase = phrasePool[Math.floor(Math.random() * phrasePool.length)];
+
     if (targetLength <= 0) {
       return phrase;
     }
@@ -477,6 +504,14 @@
       return CONFIG.chaosLevels.level1;
     }
     return null;
+  };
+
+  const getActiveAppleUrl = () => {
+    const chaosConfig = getChaosLevelConfig();
+    if (chaosConfig === CONFIG.chaosLevels.level2 || chaosConfig === CONFIG.chaosLevels.level3) {
+      return rottenAppleUrl;
+    }
+    return appleUrl;
   };
 
   const collectChaosTargets = (chaosConfig) => {
@@ -617,13 +652,16 @@
     state.chaosTimers.push(timerId);
   };
 
-  const createChaosMutation = (target) => {
+  const createChaosMutation = (target, chaosConfig) => {
     if (target.kind === "input") {
       const input = target.node;
       const originalValue = input.value;
       const originalPlaceholder = input.placeholder;
       const useValue = originalValue.trim().length > 0;
-      const replacement = buildChaosText((useValue ? originalValue : originalPlaceholder).length);
+      const replacement = buildChaosText(
+        (useValue ? originalValue : originalPlaceholder).length,
+        chaosConfig
+      );
 
       return {
         apply() {
@@ -664,7 +702,7 @@
           image.style.width = `${Math.round(rect.width)}px`;
           image.style.height = `${Math.round(rect.height)}px`;
           image.style.objectFit = "contain";
-          image.setAttribute("src", appleUrl);
+          image.setAttribute("src", getActiveAppleUrl());
           image.removeAttribute("srcset");
           image.removeAttribute("sizes");
         },
@@ -706,7 +744,7 @@
         if (!textNode.isConnected) {
           return;
         }
-        textNode.textContent = buildChaosText(originalText.length);
+        textNode.textContent = buildChaosText(originalText.length, chaosConfig);
       },
       restore() {
         if (!textNode.isConnected) {
@@ -737,7 +775,7 @@
     state.chaosTimers = [];
 
     for (const target of targets) {
-      const mutation = createChaosMutation(target);
+      const mutation = createChaosMutation(target, chaosConfig);
       const restore = registerChaosRestorer(mutation.restore);
       const latestStart = Math.max(0, chaosConfig.durationMs - chaosConfig.minFlickerMs);
       const startDelay = Math.floor(Math.random() * (latestStart + 1));
@@ -772,6 +810,10 @@
     clearFeedingTimeout();
     state.feeding = false;
     state.draggingApple = false;
+    state.nextFeedingAllowedAt =
+      performance.now() +
+      CONFIG.feedingMinCooldownMs +
+      Math.random() * CONFIG.feedingExtraCooldownMs;
     if (state.activePointerId !== null) {
       apple.releasePointerCapture?.(state.activePointerId);
       state.activePointerId = null;
@@ -784,7 +826,11 @@
   };
 
   const tryStartFeeding = (now) => {
-    if (state.feeding || Math.random() >= CONFIG.feedingChance) {
+    if (
+      state.feeding ||
+      now < state.nextFeedingAllowedAt ||
+      Math.random() >= CONFIG.feedingChance
+    ) {
       return false;
     }
 
@@ -793,6 +839,7 @@
     state.actionUntil = now + CONFIG.feedingDurationMs;
     state.draggingApple = false;
     state.appleVisible = true;
+    apple.src = getActiveAppleUrl();
     state.appleX = 32 + Math.random() * Math.max(40, window.innerWidth - 120);
     state.appleY = 32 + Math.random() * Math.max(40, window.innerHeight - 220);
     freezePet();

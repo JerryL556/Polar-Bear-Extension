@@ -18,7 +18,8 @@
     {
       "resources": [
         "walking-polar-bear.gif",
-        "apple.webp"
+        "apple.webp",
+        "rotten-apple.png"
       ],
       "matches": [
         "<all_urls>"
