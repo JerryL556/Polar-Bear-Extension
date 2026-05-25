@@ -53,7 +53,13 @@
           "THE END IS NEVER",
           "FEED ME!",
           "LOOK AT ME"
-        ]
+        ],
+        layoutDrift: {
+          elementAmplitudePx: 12,
+          elementCount: 18,
+          minDurationMs: 1800,
+          maxDurationMs: 4200
+        }
       },
       level3: {
         minHappiness: 0,
@@ -67,7 +73,13 @@
         phrases: [
           "LOOK AT ME",
           "STARVING HUNGER"
-        ]
+        ],
+        layoutDrift: {
+          elementAmplitudePx: 28,
+          elementCount: 36,
+          minDurationMs: 1000,
+          maxDurationMs: 2600
+        }
       }
     },
     chaosShortPhrases: [
@@ -288,9 +300,10 @@
     pointerX: 0,
     pointerY: 0,
     chaosActive: false,
-    chaosTimeoutId: null,
     chaosRestorers: [],
-    chaosTimers: []
+    chaosTimers: [],
+    layoutDriftAnimations: [],
+    activeChaosMutations: 0
   };
 
   const getMood = () => {
@@ -442,18 +455,132 @@
     }
   };
 
-  const clearChaosTimeout = () => {
-    if (state.chaosTimeoutId !== null) {
-      window.clearTimeout(state.chaosTimeoutId);
-      state.chaosTimeoutId = null;
-    }
-  };
-
   const clearChaosTimers = () => {
     for (const timerId of state.chaosTimers) {
       window.clearTimeout(timerId);
     }
     state.chaosTimers = [];
+  };
+
+  const finishChaosIfIdle = () => {
+    if (!state.chaosActive) {
+      return;
+    }
+
+    if (state.activeChaosMutations > 0 || state.chaosTimers.length > 0) {
+      return;
+    }
+
+    stopLayoutDrift();
+    state.chaosRestorers = [];
+    state.chaosActive = false;
+  };
+
+  const stopLayoutDrift = () => {
+    for (const animation of state.layoutDriftAnimations) {
+      animation.cancel();
+    }
+    state.layoutDriftAnimations = [];
+  };
+
+  const startLayoutDrift = (chaosConfig) => {
+    stopLayoutDrift();
+
+    const drift = chaosConfig.layoutDrift;
+    if (!drift || typeof document.documentElement.animate !== "function" || !document.body) {
+      return;
+    }
+
+    const driftTargets = [];
+    const selectors = [
+      "img",
+      "p",
+      "span",
+      "label",
+      "small",
+      "strong",
+      "em",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "li",
+      "button",
+      "a",
+      "input",
+      "textarea",
+      "select",
+      "[role='button']",
+      "[role='link']",
+      ".card",
+      ".tile",
+      ".item"
+    ];
+
+    for (const element of document.body.querySelectorAll(selectors.join(","))) {
+      if (host.contains(element) || !isVisibleElement(element)) {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 36 || rect.height < 18) {
+        continue;
+      }
+
+      const viewportArea = window.innerWidth * window.innerHeight;
+      const elementArea = rect.width * rect.height;
+      if (elementArea > viewportArea * 0.12) {
+        continue;
+      }
+
+      if (element.children.length > 8) {
+        continue;
+      }
+
+      const computedStyle = window.getComputedStyle(element);
+      if (computedStyle.position === "fixed" || computedStyle.position === "sticky") {
+        continue;
+      }
+
+      driftTargets.push(element);
+    }
+
+    for (let i = driftTargets.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [driftTargets[i], driftTargets[j]] = [driftTargets[j], driftTargets[i]];
+    }
+
+    const selectedTargets = driftTargets.slice(0, Math.min(drift.elementCount, driftTargets.length));
+    const elementAnimations = selectedTargets.map((element, index) => {
+      const amplitude = drift.elementAmplitudePx * (0.55 + Math.random() * 0.7);
+      const xAmplitude = amplitude * (0.08 + Math.random() * 0.14);
+      const duration = Math.round(
+        drift.minDurationMs + Math.random() * Math.max(1, drift.maxDurationMs - drift.minDurationMs)
+      );
+      const delay = Math.round(Math.random() * duration * 0.65);
+      const midpointA = Math.round((Math.random() * 2 - 1) * amplitude);
+      const midpointB = Math.round((Math.random() * 2 - 1) * amplitude * 0.75);
+
+      return element.animate(
+        [
+          { transform: "translate3d(0px, 0px, 0px)" },
+          { transform: `translate3d(${xAmplitude}px, ${midpointA}px, 0px)` },
+          { transform: `translate3d(${-xAmplitude * 0.7}px, ${-midpointB}px, 0px)` },
+          { transform: `translate3d(${xAmplitude * 0.4}px, ${amplitude * 0.35}px, 0px)` },
+          { transform: "translate3d(0px, 0px, 0px)" }
+        ],
+        {
+          duration,
+          iterations: Infinity,
+          easing: "ease-in-out",
+          delay
+        }
+      );
+    });
+
+    state.layoutDriftAnimations = elementAnimations;
   };
 
   const buildChaosText = (targetLength, chaosConfig) => {
@@ -620,12 +747,13 @@
   };
 
   const restoreChaos = () => {
-    clearChaosTimeout();
     clearChaosTimers();
+    stopLayoutDrift();
     for (const restore of state.chaosRestorers) {
       restore();
     }
     state.chaosRestorers = [];
+    state.activeChaosMutations = 0;
     state.chaosActive = false;
   };
 
@@ -647,6 +775,7 @@
     const timerId = window.setTimeout(() => {
       state.chaosTimers = state.chaosTimers.filter((id) => id !== timerId);
       callback();
+      finishChaosIfIdle();
     }, delayMs);
 
     state.chaosTimers.push(timerId);
@@ -773,6 +902,8 @@
     state.chaosActive = true;
     state.chaosRestorers = [];
     state.chaosTimers = [];
+    state.activeChaosMutations = 0;
+    startLayoutDrift(chaosConfig);
 
     for (const target of targets) {
       const mutation = createChaosMutation(target, chaosConfig);
@@ -792,18 +923,17 @@
         if (!state.chaosActive) {
           return;
         }
+        state.activeChaosMutations += 1;
         mutation.apply();
       }, startDelay);
 
       scheduleChaosTimer(() => {
+        if (state.activeChaosMutations > 0) {
+          state.activeChaosMutations -= 1;
+        }
         restore();
       }, startDelay + visibleDuration);
     }
-
-    clearChaosTimeout();
-    state.chaosTimeoutId = window.setTimeout(() => {
-      restoreChaos();
-    }, chaosConfig.durationMs);
   };
 
   const endFeeding = () => {
