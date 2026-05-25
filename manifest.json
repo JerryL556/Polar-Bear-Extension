@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Extension Pet",
+  "version": "1.0.0",
+  "description": "A bottom-of-page pet with a happiness meter and mood-based behavior.",
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "walking-polar-bear.gif",
+        "apple.webp"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
