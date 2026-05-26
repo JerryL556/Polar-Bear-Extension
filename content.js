@@ -34,6 +34,7 @@
         minTargets: 4,
         minFlickerMs: 1000,
         maxFlickerMs: 2500,
+        maxConcurrentMutations: 10,
         phrases: [
           "ARE YOU THERE?",
           "FEED ME!"
@@ -42,12 +43,13 @@
       level2: {
         minHappiness: 1,
         maxHappiness: 20,
-        chancePerCheck: 0.18,
+        chancePerCheck: 0.24,
         durationMs: 8000,
         targetRatio: 0.5,
         minTargets: 10,
         minFlickerMs: 2000,
         maxFlickerMs: 6000,
+        maxConcurrentMutations: 18,
         phrases: [
           "NEED APPLE",
           "THE END IS NEVER",
@@ -55,30 +57,37 @@
           "LOOK AT ME"
         ],
         layoutDrift: {
-          elementAmplitudePx: 12,
+          elementAmplitudePx: 4,
           elementCount: 18,
-          minDurationMs: 1800,
-          maxDurationMs: 4200
+          pulseCount: 6,
+          cycleDurationMs: 420,
+          minStartDelayMs: 0,
+          maxStartDelayMs: 260,
+          horizontalAmplitudePx: 2
         }
       },
       level3: {
         minHappiness: 0,
         maxHappiness: 0,
-        chancePerCheck: 0.35,
+        chancePerCheck: 0.5,
         durationMs: 11000,
         targetRatio: 0.8,
         minTargets: 16,
         minFlickerMs: 3500,
         maxFlickerMs: 9000,
+        maxConcurrentMutations: 32,
         phrases: [
           "LOOK AT ME",
           "STARVING HUNGER"
         ],
         layoutDrift: {
-          elementAmplitudePx: 28,
+          elementAmplitudePx: 7,
           elementCount: 36,
-          minDurationMs: 1000,
-          maxDurationMs: 2600
+          pulseCount: 12,
+          cycleDurationMs: 260,
+          minStartDelayMs: 0,
+          maxStartDelayMs: 180,
+          horizontalAmplitudePx: 4
         }
       }
     },
@@ -299,7 +308,6 @@
     dragOffsetY: 0,
     pointerX: 0,
     pointerY: 0,
-    chaosActive: false,
     chaosRestorers: [],
     chaosTimers: [],
     layoutDriftAnimations: [],
@@ -463,17 +471,12 @@
   };
 
   const finishChaosIfIdle = () => {
-    if (!state.chaosActive) {
-      return;
-    }
-
     if (state.activeChaosMutations > 0 || state.chaosTimers.length > 0) {
       return;
     }
 
     stopLayoutDrift();
     state.chaosRestorers = [];
-    state.chaosActive = false;
   };
 
   const stopLayoutDrift = () => {
@@ -484,8 +487,6 @@
   };
 
   const startLayoutDrift = (chaosConfig) => {
-    stopLayoutDrift();
-
     const drift = chaosConfig.layoutDrift;
     if (!drift || typeof document.documentElement.animate !== "function" || !document.body) {
       return;
@@ -552,35 +553,51 @@
       [driftTargets[i], driftTargets[j]] = [driftTargets[j], driftTargets[i]];
     }
 
-    const selectedTargets = driftTargets.slice(0, Math.min(drift.elementCount, driftTargets.length));
-    const elementAnimations = selectedTargets.map((element, index) => {
+    const selectedTargets = driftTargets
+      .slice(0, Math.min(drift.elementCount, driftTargets.length))
+      .slice(0, Math.min(drift.pulseCount ?? drift.elementCount, driftTargets.length));
+
+    const elementAnimations = selectedTargets.map((element) => {
       const amplitude = drift.elementAmplitudePx * (0.55 + Math.random() * 0.7);
-      const xAmplitude = amplitude * (0.08 + Math.random() * 0.14);
-      const duration = Math.round(
-        drift.minDurationMs + Math.random() * Math.max(1, drift.maxDurationMs - drift.minDurationMs)
+      const horizontalAmplitude = drift.horizontalAmplitudePx * (0.6 + Math.random() * 0.8);
+      const duration = Math.round(drift.cycleDurationMs * (0.94 + Math.random() * 0.12));
+      const delay = Math.round(
+        drift.minStartDelayMs + Math.random() * Math.max(0, drift.maxStartDelayMs - drift.minStartDelayMs)
       );
-      const delay = Math.round(Math.random() * duration * 0.65);
-      const midpointA = Math.round((Math.random() * 2 - 1) * amplitude);
-      const midpointB = Math.round((Math.random() * 2 - 1) * amplitude * 0.75);
+      const twitchUp = Math.round(-amplitude);
+      const twitchDown = Math.round(amplitude * (0.88 + Math.random() * 0.18));
+      const twitchSideA = Math.round(horizontalAmplitude);
+      const twitchSideB = Math.round(-horizontalAmplitude * (0.75 + Math.random() * 0.2));
+      const settleY = Math.round(amplitude * (0.14 + Math.random() * 0.12));
 
       return element.animate(
         [
           { transform: "translate3d(0px, 0px, 0px)" },
-          { transform: `translate3d(${xAmplitude}px, ${midpointA}px, 0px)` },
-          { transform: `translate3d(${-xAmplitude * 0.7}px, ${-midpointB}px, 0px)` },
-          { transform: `translate3d(${xAmplitude * 0.4}px, ${amplitude * 0.35}px, 0px)` },
+          { transform: `translate3d(${twitchSideA}px, ${twitchUp}px, 0px)` },
+          { transform: `translate3d(${twitchSideB}px, ${twitchDown}px, 0px)` },
+          { transform: `translate3d(${Math.round(twitchSideA * 0.45)}px, ${settleY}px, 0px)` },
+          { transform: `translate3d(${Math.round(twitchSideB * 0.3)}px, ${Math.round(-settleY * 0.5)}px, 0px)` },
           { transform: "translate3d(0px, 0px, 0px)" }
         ],
         {
           duration,
-          iterations: Infinity,
-          easing: "ease-in-out",
+          iterations: 1,
+          easing: "linear",
+          fill: "none",
           delay
         }
       );
     });
 
-    state.layoutDriftAnimations = elementAnimations;
+    for (const animation of elementAnimations) {
+      state.layoutDriftAnimations.push(animation);
+      animation.addEventListener("finish", () => {
+        state.layoutDriftAnimations = state.layoutDriftAnimations.filter((item) => item !== animation);
+      }, { once: true });
+      animation.addEventListener("cancel", () => {
+        state.layoutDriftAnimations = state.layoutDriftAnimations.filter((item) => item !== animation);
+      }, { once: true });
+    }
   };
 
   const buildChaosText = (targetLength, chaosConfig) => {
@@ -754,7 +771,6 @@
     }
     state.chaosRestorers = [];
     state.activeChaosMutations = 0;
-    state.chaosActive = false;
   };
 
   const registerChaosRestorer = (restore) => {
@@ -779,6 +795,10 @@
     }, delayMs);
 
     state.chaosTimers.push(timerId);
+  };
+
+  const triggerLayoutDriftPulse = (chaosConfig) => {
+    startLayoutDrift(chaosConfig);
   };
 
   const createChaosMutation = (target, chaosConfig) => {
@@ -885,12 +905,12 @@
   };
 
   const triggerChaos = () => {
-    if (state.chaosActive) {
+    const chaosConfig = getChaosLevelConfig();
+    if (!chaosConfig) {
       return;
     }
 
-    const chaosConfig = getChaosLevelConfig();
-    if (!chaosConfig) {
+    if (state.activeChaosMutations >= chaosConfig.maxConcurrentMutations) {
       return;
     }
 
@@ -899,11 +919,7 @@
       return;
     }
 
-    state.chaosActive = true;
-    state.chaosRestorers = [];
-    state.chaosTimers = [];
-    state.activeChaosMutations = 0;
-    startLayoutDrift(chaosConfig);
+    triggerLayoutDriftPulse(chaosConfig);
 
     for (const target of targets) {
       const mutation = createChaosMutation(target, chaosConfig);
@@ -920,7 +936,7 @@
       );
 
       scheduleChaosTimer(() => {
-        if (!state.chaosActive) {
+        if (state.activeChaosMutations >= chaosConfig.maxConcurrentMutations) {
           return;
         }
         state.activeChaosMutations += 1;
@@ -1049,7 +1065,6 @@
     const chaosConfig = getChaosLevelConfig();
     if (
       chaosConfig &&
-      !state.chaosActive &&
       Math.random() < chaosConfig.chancePerCheck
     ) {
       triggerChaos();
