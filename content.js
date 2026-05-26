@@ -56,6 +56,14 @@
           "FEED ME!",
           "LOOK AT ME"
         ],
+        redBlink: {
+          chancePerCheck: 0.2,
+          pulseCount: 4,
+          minStartDelayMs: 0,
+          maxStartDelayMs: 500,
+          hideDurationMs: 140,
+          showDurationMs: 240
+        },
         layoutDrift: {
           elementAmplitudePx: 4,
           elementCount: 18,
@@ -80,6 +88,14 @@
           "LOOK AT ME",
           "STARVING HUNGER"
         ],
+        redBlink: {
+          chancePerCheck: 0.38,
+          pulseCount: 9,
+          minStartDelayMs: 0,
+          maxStartDelayMs: 320,
+          hideDurationMs: 110,
+          showDurationMs: 190
+        },
         layoutDrift: {
           elementAmplitudePx: 7,
           elementCount: 36,
@@ -311,6 +327,7 @@
     chaosRestorers: [],
     chaosTimers: [],
     layoutDriftAnimations: [],
+    activeRedBlinkPulses: 0,
     activeChaosMutations: 0
   };
 
@@ -471,7 +488,11 @@
   };
 
   const finishChaosIfIdle = () => {
-    if (state.activeChaosMutations > 0 || state.chaosTimers.length > 0) {
+    if (
+      state.activeChaosMutations > 0 ||
+      state.activeRedBlinkPulses > 0 ||
+      state.chaosTimers.length > 0
+    ) {
       return;
     }
 
@@ -770,6 +791,7 @@
       restore();
     }
     state.chaosRestorers = [];
+    state.activeRedBlinkPulses = 0;
     state.activeChaosMutations = 0;
   };
 
@@ -799,6 +821,130 @@
 
   const triggerLayoutDriftPulse = (chaosConfig) => {
     startLayoutDrift(chaosConfig);
+  };
+
+  const collectRedBlinkTargets = (pulseCount) => {
+    const targets = [];
+    const selectors = [
+      "img",
+      "p",
+      "span",
+      "label",
+      "small",
+      "strong",
+      "em",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "li",
+      "button",
+      "a",
+      "input",
+      "textarea",
+      "select",
+      "[role='button']",
+      "[role='link']",
+      ".card",
+      ".tile",
+      ".item"
+    ];
+
+    for (const element of document.body.querySelectorAll(selectors.join(","))) {
+      if (host.contains(element) || !isVisibleElement(element)) {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 12) {
+        continue;
+      }
+
+      const computedStyle = window.getComputedStyle(element);
+      if (computedStyle.position === "fixed" || computedStyle.position === "sticky") {
+        continue;
+      }
+
+      targets.push(element);
+    }
+
+    for (let i = targets.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [targets[i], targets[j]] = [targets[j], targets[i]];
+    }
+
+    return targets.slice(0, Math.min(pulseCount, targets.length));
+  };
+
+  const startRedBlinkPulse = (chaosConfig) => {
+    const blink = chaosConfig.redBlink;
+    if (!blink || !document.body) {
+      return;
+    }
+
+    const targets = collectRedBlinkTargets(blink.pulseCount);
+    for (const element of targets) {
+      const startDelay = Math.round(
+        blink.minStartDelayMs + Math.random() * Math.max(0, blink.maxStartDelayMs - blink.minStartDelayMs)
+      );
+      const hideDuration = Math.round(blink.hideDurationMs * (0.9 + Math.random() * 0.25));
+      const showDuration = Math.round(blink.showDurationMs * (0.9 + Math.random() * 0.25));
+      const restoreInline = {
+        opacity: element.style.opacity,
+        filter: element.style.filter,
+        color: element.style.color,
+        backgroundColor: element.style.backgroundColor,
+        boxShadow: element.style.boxShadow,
+        transition: element.style.transition
+      };
+
+      const hideElement = () => {
+        if (!element.isConnected) {
+          return;
+        }
+        element.style.transition = "none";
+        element.style.opacity = "0";
+      };
+
+      const showRedElement = () => {
+        if (!element.isConnected) {
+          return;
+        }
+        element.style.transition = "none";
+        element.style.opacity = "1";
+        element.style.filter = "sepia(1) saturate(5) hue-rotate(-35deg) brightness(0.78) contrast(1.35)";
+        element.style.color = "#ff3b3b";
+        element.style.backgroundColor = "rgba(255, 0, 0, 0.14)";
+        element.style.boxShadow = "0 0 12px rgba(255, 0, 0, 0.82)";
+      };
+
+      const restoreElement = () => {
+        if (element.isConnected) {
+          element.style.opacity = restoreInline.opacity;
+          element.style.filter = restoreInline.filter;
+          element.style.color = restoreInline.color;
+          element.style.backgroundColor = restoreInline.backgroundColor;
+          element.style.boxShadow = restoreInline.boxShadow;
+          element.style.transition = restoreInline.transition;
+        }
+
+        if (state.activeRedBlinkPulses > 0) {
+          state.activeRedBlinkPulses -= 1;
+        }
+      };
+
+      state.activeRedBlinkPulses += 1;
+      scheduleChaosTimer(hideElement, startDelay);
+      scheduleChaosTimer(showRedElement, startDelay + hideDuration);
+      scheduleChaosTimer(hideElement, startDelay + hideDuration + showDuration);
+      scheduleChaosTimer(showRedElement, startDelay + hideDuration * 2 + showDuration);
+      scheduleChaosTimer(
+        restoreElement,
+        startDelay + hideDuration * 2 + showDuration * 2
+      );
+    }
   };
 
   const createChaosMutation = (target, chaosConfig) => {
@@ -1063,6 +1209,13 @@
     setHappiness(state.happiness - decay);
 
     const chaosConfig = getChaosLevelConfig();
+    if (
+      chaosConfig?.redBlink &&
+      Math.random() < chaosConfig.redBlink.chancePerCheck
+    ) {
+      startRedBlinkPulse(chaosConfig);
+    }
+
     if (
       chaosConfig &&
       Math.random() < chaosConfig.chancePerCheck
