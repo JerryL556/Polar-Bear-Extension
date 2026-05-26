@@ -23,6 +23,20 @@
     feedingDurationMs: 10000,
     feedingMinCooldownMs: 10000,
     feedingExtraCooldownMs: 18000,
+    sleepDurationMs: 10000,
+    sleepTickMs: 1000,
+    sleepHappinessPerTick: 2,
+    gameDurationMs: 15000,
+    gameTickMs: 1000,
+    gameSpawnMinMs: 700,
+    gameSpawnMaxMs: 950,
+    gameAppleMinSpeed: 220,
+    gameAppleMaxSpeed: 330,
+    gameAppleMinSize: 44,
+    gameAppleMaxSize: 66,
+    gameRewardPerCatch: 3,
+    gameFollowSpeed: 2,
+    gameResultMessageMs: 2200,
     appleDropPadding: 64,
     chaosLevels: {
       level1: {
@@ -181,7 +195,7 @@
       .pet-visual {
         width: 100%;
         height: 100%;
-        transform-origin: center bottom;
+        transform-origin: center center;
         transition: transform 180ms ease;
       }
 
@@ -224,14 +238,47 @@
         filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.34));
       }
 
-      .hud {
+      .menu-toggle {
+        position: absolute;
+        top: 10px;
+        right: 8px;
+        width: 16px;
+        height: 16px;
+        border: 0;
+        border-radius: 999px;
+        background: #fff3de;
+        box-shadow: 0 0 0 2px rgba(81, 59, 40, 0.18);
+        cursor: pointer;
+        pointer-events: auto;
+        z-index: 3;
+        transition: opacity 140ms ease, transform 140ms ease, background 140ms ease;
+      }
+
+      .menu-toggle::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: inherit;
+        background: #9d3f32;
+      }
+
+      .menu-toggle:hover {
+        transform: scale(1.08);
+      }
+
+      .menu-toggle.disabled {
+        opacity: 0.32;
+        cursor: not-allowed;
+      }
+
+      .action-menu {
         position: absolute;
         left: 50%;
-        bottom: calc(100% - 6px);
+        bottom: calc(100% - 8px);
         transform: translateX(-50%);
-        width: 150px;
-        padding: 8px;
-        border-radius: 10px;
+        width: 186px;
+        padding: 10px;
+        border-radius: 14px;
         background: rgba(18, 20, 26, 0.88);
         color: #f5f7fa;
         font-family: Arial, sans-serif;
@@ -241,11 +288,11 @@
         backdrop-filter: blur(6px);
       }
 
-      .hud.hidden {
+      .action-menu.hidden {
         display: none;
       }
 
-      .hud-row {
+      .menu-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -272,6 +319,93 @@
         opacity: 0.72;
       }
 
+      .menu-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .menu-button {
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.12);
+        color: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .menu-button.primary {
+        background: rgba(255, 108, 82, 0.26);
+      }
+
+      .menu-button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .game-ui {
+        position: absolute;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(18, 20, 26, 0.82);
+        color: #f8f4ee;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.22);
+        pointer-events: none;
+      }
+
+      .game-ui.hidden {
+        display: none;
+      }
+
+      .game-result {
+        position: absolute;
+        top: 56px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(18, 20, 26, 0.88);
+        color: #fff4ea;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+        pointer-events: none;
+      }
+
+      .game-result.hidden {
+        display: none;
+      }
+
+      .game-apples {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .game-apple {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 52px;
+        height: 52px;
+        object-fit: contain;
+        filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
+        pointer-events: none;
+      }
+
       @keyframes bob {
         0%, 100% { transform: translateY(0); }
         50% { transform: translateY(-4px); }
@@ -279,17 +413,24 @@
     </style>
     <div class="pet-layer">
       <div class="pet-shell">
-        <div class="hud${CONFIG.devHudVisible ? "" : " hidden"}">
-          <div class="hud-row">
+        <button class="menu-toggle" type="button" aria-label="Open pet menu"></button>
+        <div class="action-menu hidden">
+          <div class="menu-row">
             <span>Happiness</span>
-            <span class="value">80</span>
+            <span class="menu-value">80</span>
           </div>
           <div class="bar">
-            <div class="bar-fill"></div>
+            <div class="bar-fill menu-bar-fill"></div>
           </div>
-          <div class="hud-row" style="margin-top: 6px; margin-bottom: 0;">
-            <span class="state">normal</span>
-            <span class="hint">click pet</span>
+          <div class="menu-row" style="margin-top: 6px; margin-bottom: 0;">
+            <span class="menu-state">normal</span>
+            <span class="hint menu-hint">menu</span>
+          </div>
+          <div class="menu-actions">
+            <button class="menu-button primary action-sleep" type="button">Sleep</button>
+            <button class="menu-button action-play" type="button">Play Game</button>
+            <button class="menu-button" type="button" disabled>Feed Soon</button>
+            <button class="menu-button action-close" type="button">Close</button>
           </div>
         </div>
         <div class="pet" title="Click to cheer up the pet">
@@ -299,6 +440,12 @@
           </div>
         </div>
       </div>
+      <div class="game-ui hidden">
+        <span class="game-score">Caught: 0</span>
+        <span class="game-time">15s</span>
+      </div>
+      <div class="game-result hidden"></div>
+      <div class="game-apples"></div>
       <img class="apple" alt="Apple">
     </div>
   `;
@@ -314,10 +461,20 @@
   const petImg = shadow.querySelector(".pet-visual img:not(.pet-still)");
   const petStill = shadow.querySelector(".pet-still");
   const apple = shadow.querySelector(".apple");
-  const hud = shadow.querySelector(".hud");
-  const valueLabel = shadow.querySelector(".value");
-  const stateLabel = shadow.querySelector(".state");
-  const barFill = shadow.querySelector(".bar-fill");
+  const menuToggle = shadow.querySelector(".menu-toggle");
+  const actionMenu = shadow.querySelector(".action-menu");
+  const valueLabel = shadow.querySelector(".menu-value");
+  const stateLabel = shadow.querySelector(".menu-state");
+  const barFill = shadow.querySelector(".menu-bar-fill");
+  const menuHint = shadow.querySelector(".menu-hint");
+  const sleepButton = shadow.querySelector(".action-sleep");
+  const playButton = shadow.querySelector(".action-play");
+  const closeButton = shadow.querySelector(".action-close");
+  const gameUi = shadow.querySelector(".game-ui");
+  const gameScore = shadow.querySelector(".game-score");
+  const gameTime = shadow.querySelector(".game-time");
+  const gameResult = shadow.querySelector(".game-result");
+  const gameApplesLayer = shadow.querySelector(".game-apples");
 
   apple.src = appleUrl;
 
@@ -331,6 +488,19 @@
     bounceDurationMs: 1800,
     feeding: false,
     feedingTimeoutId: null,
+    sleeping: false,
+    sleepTimerId: null,
+    sleepTicksRemaining: 0,
+    menuOpen: false,
+    gameActive: false,
+    gameTimerId: null,
+    gameSpawnTimerId: null,
+    gameTimeRemainingMs: 0,
+    gameCaughtCount: 0,
+    gameTargetX: null,
+    gameApples: [],
+    nextGameAppleId: 0,
+    gameResultTimerId: null,
     appleVisible: false,
     appleX: 0,
     appleY: 0,
@@ -352,6 +522,41 @@
   const getOccurrenceMultiplier = (key) => clamp((activeSettings[key] ?? 100) / 100, 0, 2);
   const scaleCount = (value, key) => Math.max(0, Math.round(value * getOccurrenceMultiplier(key)));
   const scaleChance = (value, key) => clamp(value * getOccurrenceMultiplier(key), 0, 1);
+  const isBearPaused = () => state.feeding || state.menuOpen || state.sleeping || state.gameActive;
+
+  const updateActionMenuState = () => {
+    actionMenu.classList.toggle("hidden", !state.menuOpen);
+    menuToggle.classList.toggle("disabled", state.feeding || state.gameActive);
+    sleepButton.disabled = state.feeding || state.sleeping || state.gameActive;
+    playButton.disabled = state.feeding || state.sleeping || state.gameActive;
+    menuHint.textContent = state.feeding
+      ? "busy"
+      : state.gameActive
+        ? "playing"
+      : state.sleeping
+        ? "sleeping"
+        : state.menuOpen
+          ? "actions"
+          : "menu";
+  };
+
+  const openActionMenu = () => {
+    if (state.feeding || state.gameActive) {
+      return;
+    }
+    state.menuOpen = true;
+    freezePet();
+    updateActionMenuState();
+    updateHud();
+  };
+
+  const closeActionMenu = () => {
+    state.menuOpen = false;
+    if (!state.feeding && !state.sleeping) {
+      unfreezePet();
+    }
+    updateActionMenuState();
+  };
 
   const applyPetEnabledState = () => {
     const enabled = activeSettings.petEnabled;
@@ -360,15 +565,25 @@
     if (enabled) {
       renderApple();
       updateHud();
+      updateActionMenuState();
+      updateGameUi();
       return;
     }
 
     clearFeedingTimeout();
+    if (state.sleepTimerId !== null) {
+      window.clearInterval(state.sleepTimerId);
+      state.sleepTimerId = null;
+    }
+    endGame(false);
     state.feeding = false;
+    state.sleeping = false;
+    state.menuOpen = false;
     state.draggingApple = false;
     state.appleVisible = false;
     renderApple();
     restoreChaos();
+    updateActionMenuState();
   };
 
   const setNextFeedingCooldown = () => {
@@ -379,6 +594,9 @@
   };
 
   const getMood = () => {
+    if (state.sleeping) {
+      return "sleeping";
+    }
     if (state.happiness > 80) {
       return "content";
     }
@@ -462,12 +680,32 @@
     barFill.style.width = `${state.happiness}%`;
 
     if (state.happiness > 80) {
-      hud.style.border = "1px solid rgba(116, 201, 113, 0.35)";
+      actionMenu.style.border = "1px solid rgba(116, 201, 113, 0.35)";
     } else if (state.happiness >= 50) {
-      hud.style.border = "1px solid rgba(247, 201, 72, 0.35)";
+      actionMenu.style.border = "1px solid rgba(247, 201, 72, 0.35)";
     } else {
-      hud.style.border = "1px solid rgba(255, 90, 90, 0.42)";
+      actionMenu.style.border = "1px solid rgba(255, 90, 90, 0.42)";
     }
+  };
+
+  const updateGameUi = () => {
+    gameUi.classList.toggle("hidden", !state.gameActive);
+    gameScore.textContent = `Caught: ${state.gameCaughtCount}`;
+    gameTime.textContent = `${Math.max(0, Math.ceil(state.gameTimeRemainingMs / 1000))}s`;
+  };
+
+  const showGameResult = (message) => {
+    if (state.gameResultTimerId !== null) {
+      window.clearTimeout(state.gameResultTimerId);
+      state.gameResultTimerId = null;
+    }
+
+    gameResult.textContent = message;
+    gameResult.classList.remove("hidden");
+    state.gameResultTimerId = window.setTimeout(() => {
+      gameResult.classList.add("hidden");
+      state.gameResultTimerId = null;
+    }, CONFIG.gameResultMessageMs);
   };
 
   const renderApple = () => {
@@ -480,7 +718,112 @@
     const maxX = Math.max(0, window.innerWidth - CONFIG.petWidth - 8);
     state.x = clamp(state.x, 0, maxX);
     shell.style.transform = `translateX(${state.x}px)`;
-    petVisual.style.transform = `scaleX(${state.direction < 0 ? 1 : -1})`;
+    const facingScale = state.direction < 0 ? 1 : -1;
+    petVisual.style.transform = `scaleX(${facingScale})${state.sleeping ? " rotate(180deg)" : ""}`;
+  };
+
+  const clearGameApples = () => {
+    for (const appleState of state.gameApples) {
+      appleState.el.remove();
+    }
+    state.gameApples = [];
+  };
+
+  const scheduleNextGameApple = () => {
+    if (!state.gameActive) {
+      return;
+    }
+
+    const delay = CONFIG.gameSpawnMinMs + Math.random() * (CONFIG.gameSpawnMaxMs - CONFIG.gameSpawnMinMs);
+    state.gameSpawnTimerId = window.setTimeout(() => {
+      if (!state.gameActive) {
+        return;
+      }
+
+      const size = CONFIG.gameAppleMinSize + Math.random() * (CONFIG.gameAppleMaxSize - CONFIG.gameAppleMinSize);
+      const x = Math.random() * Math.max(16, window.innerWidth - size - 16);
+      const img = document.createElement("img");
+      img.className = "game-apple";
+      img.src = appleUrl;
+      img.alt = "Falling apple";
+      img.style.width = `${Math.round(size)}px`;
+      img.style.height = `${Math.round(size)}px`;
+      gameApplesLayer.appendChild(img);
+
+      state.gameApples.push({
+        id: state.nextGameAppleId += 1,
+        x,
+        y: -size,
+        size,
+        speed: CONFIG.gameAppleMinSpeed + Math.random() * (CONFIG.gameAppleMaxSpeed - CONFIG.gameAppleMinSpeed),
+        el: img
+      });
+
+      scheduleNextGameApple();
+    }, delay);
+  };
+
+  const endGame = (grantReward = true) => {
+    if (state.gameTimerId !== null) {
+      window.clearInterval(state.gameTimerId);
+      state.gameTimerId = null;
+    }
+    if (state.gameSpawnTimerId !== null) {
+      window.clearTimeout(state.gameSpawnTimerId);
+      state.gameSpawnTimerId = null;
+    }
+
+    const caughtCount = state.gameCaughtCount;
+    const reward = grantReward ? caughtCount * CONFIG.gameRewardPerCatch : 0;
+
+    state.gameActive = false;
+    state.gameTimeRemainingMs = 0;
+    state.gameTargetX = null;
+    state.gameCaughtCount = 0;
+    clearGameApples();
+    updateGameUi();
+
+    if (reward > 0) {
+      setHappiness(state.happiness + reward);
+    }
+
+    showGameResult(`Caught ${caughtCount} apples, +${reward} happiness`);
+
+    if (!state.menuOpen && !state.feeding && !state.sleeping) {
+      unfreezePet();
+    }
+    updateActionMenuState();
+    scheduleNextAction(performance.now());
+  };
+
+  const startGame = () => {
+    if (state.feeding || state.sleeping || state.gameActive) {
+      return;
+    }
+
+    state.menuOpen = false;
+    state.gameActive = true;
+    state.action = "idle";
+    state.gameCaughtCount = 0;
+    state.gameTimeRemainingMs = CONFIG.gameDurationMs;
+    state.gameTargetX = state.x;
+    freezePet();
+    updateActionMenuState();
+    updateGameUi();
+
+    clearGameApples();
+    scheduleNextGameApple();
+
+    if (state.gameTimerId !== null) {
+      window.clearInterval(state.gameTimerId);
+    }
+    state.gameTimerId = window.setInterval(() => {
+      state.gameTimeRemainingMs -= CONFIG.gameTickMs;
+      updateGameUi();
+      if (state.gameTimeRemainingMs <= 0) {
+        endGame(true);
+      }
+    }, CONFIG.gameTickMs);
   };
 
   const captureStillFrame = () => {
@@ -1227,15 +1570,69 @@
       state.activePointerId = null;
     }
     state.appleVisible = false;
-    unfreezePet();
+    if (!state.menuOpen && !state.sleeping) {
+      unfreezePet();
+    }
     renderApple();
     updateHud();
+    updateActionMenuState();
     scheduleNextAction(performance.now());
+  };
+
+  const endSleep = () => {
+    if (state.sleepTimerId !== null) {
+      window.clearInterval(state.sleepTimerId);
+      state.sleepTimerId = null;
+    }
+    state.sleeping = false;
+    state.sleepTicksRemaining = 0;
+    if (!state.menuOpen && !state.feeding) {
+      unfreezePet();
+    }
+    renderPosition();
+    updateHud();
+    updateActionMenuState();
+    scheduleNextAction(performance.now());
+  };
+
+  const startSleep = () => {
+    if (state.feeding || state.sleeping) {
+      return;
+    }
+
+    state.menuOpen = false;
+    state.sleeping = true;
+    state.action = "idle";
+    state.sleepTicksRemaining = Math.floor(CONFIG.sleepDurationMs / CONFIG.sleepTickMs);
+    freezePet();
+    renderPosition();
+    updateActionMenuState();
+    updateHud();
+
+    if (state.sleepTimerId !== null) {
+      window.clearInterval(state.sleepTimerId);
+    }
+
+    state.sleepTimerId = window.setInterval(() => {
+      if (state.sleepTicksRemaining <= 0) {
+        endSleep();
+        return;
+      }
+
+      state.sleepTicksRemaining -= 1;
+      setHappiness(state.happiness + CONFIG.sleepHappinessPerTick);
+
+      if (state.sleepTicksRemaining <= 0) {
+        endSleep();
+      }
+    }, CONFIG.sleepTickMs);
   };
 
   const tryStartFeeding = (now) => {
     if (
       !activeSettings.petEnabled ||
+      state.menuOpen ||
+      state.sleeping ||
       state.feeding ||
       now < state.nextFeedingAllowedAt ||
       Math.random() >= CONFIG.feedingChance
@@ -1254,6 +1651,7 @@
     freezePet();
     renderApple();
     updateHud();
+    updateActionMenuState();
     clearFeedingTimeout();
     state.feedingTimeoutId = window.setTimeout(() => {
       endFeeding();
@@ -1292,11 +1690,11 @@
       return;
     }
 
-    if (!state.feeding && now >= state.actionUntil) {
+    if (!isBearPaused() && now >= state.actionUntil) {
       scheduleNextAction(now);
     }
 
-    if (!state.feeding && state.action === "walk") {
+    if (!isBearPaused() && state.action === "walk") {
       state.x += getMovementSpeed() * state.direction * deltaSeconds;
       const maxX = Math.max(0, window.innerWidth - CONFIG.petWidth - 8);
       if (state.x <= 0) {
@@ -1308,6 +1706,47 @@
         state.direction = -1;
         state.actionUntil = now + getWalkDuration() * 0.7;
       }
+    }
+
+    if (state.gameActive) {
+      if (state.gameTargetX !== null) {
+        const targetX = clamp(state.gameTargetX - CONFIG.petWidth / 2, 0, Math.max(0, window.innerWidth - CONFIG.petWidth - 8));
+        state.x += (targetX - state.x) * clamp(CONFIG.gameFollowSpeed * deltaSeconds, 0, 1);
+      }
+
+      const petLeft = state.x;
+      const petRight = state.x + CONFIG.petWidth;
+      const petTop = window.innerHeight - CONFIG.groundOffset - CONFIG.petHeight;
+      const petBottom = window.innerHeight - CONFIG.groundOffset;
+
+      state.gameApples = state.gameApples.filter((appleState) => {
+        appleState.y += appleState.speed * deltaSeconds;
+        appleState.el.style.transform = `translate(${appleState.x}px, ${appleState.y}px)`;
+
+        const appleLeft = appleState.x;
+        const appleRight = appleState.x + appleState.size;
+        const appleTop = appleState.y;
+        const appleBottom = appleState.y + appleState.size;
+        const caught =
+          appleLeft < petRight &&
+          appleRight > petLeft &&
+          appleTop < petBottom &&
+          appleBottom > petTop;
+
+        if (caught) {
+          state.gameCaughtCount += 1;
+          updateGameUi();
+          appleState.el.remove();
+          return false;
+        }
+
+        if (appleTop > window.innerHeight + appleState.size) {
+          appleState.el.remove();
+          return false;
+        }
+
+        return true;
+      });
     }
 
     renderPosition();
@@ -1329,7 +1768,7 @@
   };
 
   pet.addEventListener("click", () => {
-    if (!activeSettings.petEnabled) {
+    if (!activeSettings.petEnabled || state.menuOpen || state.sleeping || state.feeding) {
       return;
     }
     setHappiness(state.happiness + activeSettings.clickGain);
@@ -1397,6 +1836,9 @@
   });
 
   const handlePointerMove = (event) => {
+    if (state.gameActive) {
+      state.gameTargetX = event.clientX;
+    }
     if (!state.draggingApple || event.pointerId !== state.activePointerId) {
       return;
     }
@@ -1435,6 +1877,39 @@
   window.addEventListener("pointermove", handlePointerMove, true);
   window.addEventListener("pointerup", finishAppleDrag, true);
   window.addEventListener("pointercancel", cancelAppleDrag, true);
+  menuToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (state.feeding) {
+      return;
+    }
+    if (state.menuOpen) {
+      closeActionMenu();
+    } else {
+      openActionMenu();
+    }
+  });
+  sleepButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    startSleep();
+  });
+  playButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    startGame();
+  });
+  closeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeActionMenu();
+  });
+  shadow.addEventListener("pointerdown", (event) => {
+    const path = event.composedPath();
+    if (!state.menuOpen) {
+      return;
+    }
+    if (path.includes(actionMenu) || path.includes(menuToggle)) {
+      return;
+    }
+    closeActionMenu();
+  });
 
   const applySettings = (nextSettings) => {
     Object.assign(activeSettings, DEFAULT_SETTINGS, nextSettings ?? {});
@@ -1467,12 +1942,17 @@
       state.appleY = clamp(state.appleY, 8, window.innerHeight - CONFIG.appleSize - 8);
       renderApple();
     }
+    if (state.gameActive) {
+      state.gameTargetX = clamp(state.gameTargetX ?? state.x, 0, window.innerWidth);
+    }
   });
 
   updateMoodStyles();
   updateHud();
+  updateActionMenuState();
   renderPosition();
   renderApple();
+  updateGameUi();
   scheduleNextAction(performance.now());
   applyPetEnabledState();
   startDecayLoop();
