@@ -26,8 +26,8 @@
     appleDropPadding: 64,
     chaosLevels: {
       level1: {
-        minHappiness: 21,
-        maxHappiness: 40,
+        minHappiness: 31,
+        maxHappiness: 60,
         chancePerCheck: 0.1,
         durationMs: 5000,
         targetRatio: 0.25,
@@ -42,7 +42,7 @@
       },
       level2: {
         minHappiness: 1,
-        maxHappiness: 20,
+        maxHappiness: 30,
         chancePerCheck: 0.24,
         durationMs: 8000,
         targetRatio: 0.5,
@@ -641,10 +641,10 @@
     if (state.happiness === 0) {
       return CONFIG.chaosLevels.level3;
     }
-    if (state.happiness <= 20) {
+    if (state.happiness <= 30) {
       return CONFIG.chaosLevels.level2;
     }
-    if (state.happiness <= 40) {
+    if (state.happiness <= 60) {
       return CONFIG.chaosLevels.level1;
     }
     return null;
