@@ -128,6 +128,8 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const activeSettings = { ...DEFAULT_SETTINGS };
+  const activeChaosTargets = new WeakSet();
+  const activeRedBlinkTargets = new WeakSet();
 
   const host = document.createElement("div");
   host.id = "extension-pet-host";
@@ -789,7 +791,7 @@
     ];
 
     for (const input of document.querySelectorAll(selectors.join(","))) {
-      if (!isVisibleElement(input) || input.disabled || input.readOnly) {
+      if (!isVisibleElement(input) || input.disabled || input.readOnly || activeChaosTargets.has(input)) {
         continue;
       }
 
@@ -803,7 +805,7 @@
     }
 
     for (const image of document.querySelectorAll("img")) {
-      if (!isVisibleElement(image) || image === apple || host.contains(image)) {
+      if (!isVisibleElement(image) || image === apple || host.contains(image) || activeChaosTargets.has(image)) {
         continue;
       }
 
@@ -827,6 +829,9 @@
       acceptNode(textNode) {
         const parent = textNode.parentElement;
         if (!parent || seen.has(parent) || host.contains(parent)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (activeChaosTargets.has(textNode)) {
           return NodeFilter.FILTER_REJECT;
         }
 
@@ -953,7 +958,7 @@
     ];
 
     for (const element of document.body.querySelectorAll(selectors.join(","))) {
-      if (host.contains(element) || !isVisibleElement(element)) {
+      if (host.contains(element) || !isVisibleElement(element) || activeRedBlinkTargets.has(element)) {
         continue;
       }
 
@@ -986,6 +991,7 @@
 
     const targets = collectRedBlinkTargets(scaleCount(blink.pulseCount, "flashOccurrence"));
     for (const element of targets) {
+      activeRedBlinkTargets.add(element);
       const startDelay = Math.round(
         blink.minStartDelayMs + Math.random() * Math.max(0, blink.maxStartDelayMs - blink.minStartDelayMs)
       );
@@ -1020,7 +1026,7 @@
         element.style.boxShadow = "0 0 12px rgba(255, 0, 0, 0.82)";
       };
 
-      const restoreElement = () => {
+      const restoreElement = registerChaosRestorer(() => {
         if (element.isConnected) {
           element.style.opacity = restoreInline.opacity;
           element.style.filter = restoreInline.filter;
@@ -1029,7 +1035,11 @@
           element.style.boxShadow = restoreInline.boxShadow;
           element.style.transition = restoreInline.transition;
         }
+        activeRedBlinkTargets.delete(element);
+      });
 
+      const finishRedBlinkPulse = () => {
+        restoreElement();
         if (state.activeRedBlinkPulses > 0) {
           state.activeRedBlinkPulses -= 1;
         }
@@ -1041,7 +1051,7 @@
       scheduleChaosTimer(hideElement, startDelay + hideDuration + showDuration);
       scheduleChaosTimer(showRedElement, startDelay + hideDuration * 2 + showDuration);
       scheduleChaosTimer(
-        restoreElement,
+        finishRedBlinkPulse,
         startDelay + hideDuration * 2 + showDuration * 2
       );
     }
@@ -1050,6 +1060,7 @@
   const createChaosMutation = (target, chaosConfig) => {
     if (target.kind === "input") {
       const input = target.node;
+      activeChaosTargets.add(input);
       const originalValue = input.value;
       const originalPlaceholder = input.placeholder;
       const useValue = originalValue.trim().length > 0;
@@ -1071,16 +1082,19 @@
         },
         restore() {
           if (!input.isConnected) {
+            activeChaosTargets.delete(input);
             return;
           }
           input.value = originalValue;
           input.placeholder = originalPlaceholder;
+          activeChaosTargets.delete(input);
         }
       };
     }
 
     if (target.kind === "image") {
       const image = target.node;
+      activeChaosTargets.add(image);
       const rect = image.getBoundingClientRect();
       const originalSrc = image.getAttribute("src");
       const originalSrcset = image.getAttribute("srcset");
@@ -1103,6 +1117,7 @@
         },
         restore() {
           if (!image.isConnected) {
+            activeChaosTargets.delete(image);
             return;
           }
 
@@ -1127,11 +1142,13 @@
           image.style.width = originalWidth;
           image.style.height = originalHeight;
           image.style.objectFit = originalObjectFit;
+          activeChaosTargets.delete(image);
         }
       };
     }
 
     const textNode = target.node;
+    activeChaosTargets.add(textNode);
     const originalText = textNode.textContent ?? "";
 
     return {
@@ -1143,9 +1160,11 @@
       },
       restore() {
         if (!textNode.isConnected) {
+          activeChaosTargets.delete(textNode);
           return;
         }
         textNode.textContent = originalText;
+        activeChaosTargets.delete(textNode);
       }
     };
   };
