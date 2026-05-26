@@ -26,6 +26,11 @@
     sleepDurationMs: 10000,
     sleepTickMs: 1000,
     sleepHappinessPerTick: 2,
+    pettingDurationMs: 5000,
+    pettingRewardPerCycle: 2,
+    pettingBounceMs: 120,
+    pettingTouchZonePx: 14,
+    pettingAboveZonePx: 34,
     gameDurationMs: 15000,
     gameTickMs: 1000,
     gameSpawnMinMs: 700,
@@ -34,7 +39,7 @@
     gameAppleMaxSpeed: 330,
     gameAppleMinSize: 44,
     gameAppleMaxSize: 66,
-    gameRewardPerCatch: 3,
+    gameRewardPerCatch: 5,
     gameFollowSpeed: 2,
     gameResultMessageMs: 2200,
     appleDropPadding: 64,
@@ -429,7 +434,7 @@
           <div class="menu-actions">
             <button class="menu-button primary action-sleep" type="button">Sleep</button>
             <button class="menu-button action-play" type="button">Play Game</button>
-            <button class="menu-button" type="button" disabled>Feed Soon</button>
+            <button class="menu-button action-pet" type="button">Pet</button>
             <button class="menu-button action-close" type="button">Close</button>
           </div>
         </div>
@@ -469,6 +474,7 @@
   const menuHint = shadow.querySelector(".menu-hint");
   const sleepButton = shadow.querySelector(".action-sleep");
   const playButton = shadow.querySelector(".action-play");
+  const petButton = shadow.querySelector(".action-pet");
   const closeButton = shadow.querySelector(".action-close");
   const gameUi = shadow.querySelector(".game-ui");
   const gameScore = shadow.querySelector(".game-score");
@@ -491,6 +497,12 @@
     sleeping: false,
     sleepTimerId: null,
     sleepTicksRemaining: 0,
+    petting: false,
+    pettingTimerId: null,
+    pettingScore: 0,
+    pettingPointerState: "idle",
+    pettingBounceTimeoutId: null,
+    pettingBounceActive: false,
     menuOpen: false,
     gameActive: false,
     gameTimerId: null,
@@ -522,17 +534,20 @@
   const getOccurrenceMultiplier = (key) => clamp((activeSettings[key] ?? 100) / 100, 0, 2);
   const scaleCount = (value, key) => Math.max(0, Math.round(value * getOccurrenceMultiplier(key)));
   const scaleChance = (value, key) => clamp(value * getOccurrenceMultiplier(key), 0, 1);
-  const isBearPaused = () => state.feeding || state.menuOpen || state.sleeping || state.gameActive;
+  const isBearPaused = () => state.feeding || state.menuOpen || state.sleeping || state.gameActive || state.petting;
 
   const updateActionMenuState = () => {
     actionMenu.classList.toggle("hidden", !state.menuOpen);
     menuToggle.classList.toggle("disabled", state.feeding || state.gameActive);
     sleepButton.disabled = state.feeding || state.sleeping || state.gameActive;
     playButton.disabled = state.feeding || state.sleeping || state.gameActive;
+    petButton.disabled = state.feeding || state.sleeping || state.gameActive || state.petting;
     menuHint.textContent = state.feeding
       ? "busy"
       : state.gameActive
         ? "playing"
+      : state.petting
+        ? "petting"
       : state.sleeping
         ? "sleeping"
         : state.menuOpen
@@ -575,9 +590,18 @@
       window.clearInterval(state.sleepTimerId);
       state.sleepTimerId = null;
     }
+    if (state.pettingTimerId !== null) {
+      window.clearTimeout(state.pettingTimerId);
+      state.pettingTimerId = null;
+    }
+    if (state.pettingBounceTimeoutId !== null) {
+      window.clearTimeout(state.pettingBounceTimeoutId);
+      state.pettingBounceTimeoutId = null;
+    }
     endGame(false);
     state.feeding = false;
     state.sleeping = false;
+    state.petting = false;
     state.menuOpen = false;
     state.draggingApple = false;
     state.appleVisible = false;
@@ -594,6 +618,9 @@
   };
 
   const getMood = () => {
+    if (state.petting) {
+      return "petting";
+    }
     if (state.sleeping) {
       return "sleeping";
     }
@@ -694,6 +721,19 @@
     gameTime.textContent = `${Math.max(0, Math.ceil(state.gameTimeRemainingMs / 1000))}s`;
   };
 
+  const triggerPetBounce = () => {
+    state.pettingBounceActive = true;
+    renderPosition();
+    if (state.pettingBounceTimeoutId !== null) {
+      window.clearTimeout(state.pettingBounceTimeoutId);
+    }
+    state.pettingBounceTimeoutId = window.setTimeout(() => {
+      state.pettingBounceActive = false;
+      renderPosition();
+      state.pettingBounceTimeoutId = null;
+    }, CONFIG.pettingBounceMs);
+  };
+
   const showGameResult = (message) => {
     if (state.gameResultTimerId !== null) {
       window.clearTimeout(state.gameResultTimerId);
@@ -719,7 +759,8 @@
     state.x = clamp(state.x, 0, maxX);
     shell.style.transform = `translateX(${state.x}px)`;
     const facingScale = state.direction < 0 ? 1 : -1;
-    petVisual.style.transform = `scaleX(${facingScale})${state.sleeping ? " rotate(180deg)" : ""}`;
+    const bounceScale = state.pettingBounceActive ? " scaleY(0.72)" : "";
+    petVisual.style.transform = `scaleX(${facingScale})${state.sleeping ? " rotate(180deg)" : ""}${bounceScale}`;
   };
 
   const clearGameApples = () => {
@@ -794,6 +835,52 @@
     }
     updateActionMenuState();
     scheduleNextAction(performance.now());
+  };
+
+  const endPetting = () => {
+    if (state.pettingTimerId !== null) {
+      window.clearTimeout(state.pettingTimerId);
+      state.pettingTimerId = null;
+    }
+    state.petting = false;
+    const reward = state.pettingScore * CONFIG.pettingRewardPerCycle;
+    const finalScore = state.pettingScore;
+    state.pettingScore = 0;
+    state.pettingPointerState = "idle";
+    if (!state.menuOpen && !state.feeding && !state.sleeping && !state.gameActive) {
+      unfreezePet();
+    }
+    renderPosition();
+    if (reward > 0) {
+      setHappiness(state.happiness + reward);
+    }
+    showGameResult(`Pats ${finalScore}, +${reward} happiness`);
+    updateHud();
+    updateActionMenuState();
+    scheduleNextAction(performance.now());
+  };
+
+  const startPetting = () => {
+    if (state.feeding || state.sleeping || state.gameActive || state.petting) {
+      return;
+    }
+
+    state.menuOpen = false;
+    state.petting = true;
+    state.pettingScore = 0;
+    state.pettingPointerState = "idle";
+    state.action = "idle";
+    freezePet();
+    renderPosition();
+    updateActionMenuState();
+    updateHud();
+
+    if (state.pettingTimerId !== null) {
+      window.clearTimeout(state.pettingTimerId);
+    }
+    state.pettingTimerId = window.setTimeout(() => {
+      endPetting();
+    }, CONFIG.pettingDurationMs);
   };
 
   const startGame = () => {
@@ -1596,7 +1683,7 @@
   };
 
   const startSleep = () => {
-    if (state.feeding || state.sleeping) {
+    if (state.feeding || state.sleeping || state.petting) {
       return;
     }
 
@@ -1633,6 +1720,7 @@
       !activeSettings.petEnabled ||
       state.menuOpen ||
       state.sleeping ||
+      state.petting ||
       state.feeding ||
       now < state.nextFeedingAllowedAt ||
       Math.random() >= CONFIG.feedingChance
@@ -1768,7 +1856,7 @@
   };
 
   pet.addEventListener("click", () => {
-    if (!activeSettings.petEnabled || state.menuOpen || state.sleeping || state.feeding) {
+    if (!activeSettings.petEnabled || state.menuOpen || state.sleeping || state.feeding || state.petting) {
       return;
     }
     setHappiness(state.happiness + activeSettings.clickGain);
@@ -1839,6 +1927,31 @@
     if (state.gameActive) {
       state.gameTargetX = event.clientX;
     }
+    if (state.petting) {
+      const petRect = pet.getBoundingClientRect();
+      const aboveZoneTop = petRect.top - CONFIG.pettingAboveZonePx;
+      const aboveZoneBottom = petRect.top - 2;
+      const touchZoneBottom = petRect.top + CONFIG.pettingTouchZonePx;
+      const insideHorizontal = event.clientX >= petRect.left && event.clientX <= petRect.right;
+
+      if (insideHorizontal && event.clientY >= aboveZoneTop && event.clientY <= aboveZoneBottom) {
+        state.pettingPointerState = "above";
+      } else if (
+        insideHorizontal &&
+        event.clientY >= petRect.top &&
+        event.clientY <= touchZoneBottom &&
+        state.pettingPointerState === "above"
+      ) {
+        state.pettingPointerState = "touching";
+        state.pettingScore += 1;
+        triggerPetBounce();
+        showGameResult(`Pet score: ${state.pettingScore}`);
+      } else if (!insideHorizontal || event.clientY < aboveZoneTop || event.clientY > touchZoneBottom) {
+        if (state.pettingPointerState === "touching") {
+          state.pettingPointerState = "idle";
+        }
+      }
+    }
     if (!state.draggingApple || event.pointerId !== state.activePointerId) {
       return;
     }
@@ -1895,6 +2008,10 @@
   playButton.addEventListener("click", (event) => {
     event.stopPropagation();
     startGame();
+  });
+  petButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    startPetting();
   });
   closeButton.addEventListener("click", (event) => {
     event.stopPropagation();
