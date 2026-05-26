@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Polar Bear Settings</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header class="panel-header">
+        <p class="eyebrow">Extension Pet</p>
+        <h1>Polar Bear Settings</h1>
+      </header>
+
+      <section class="setting toggle-row">
+        <div>
+          <label for="petEnabled">Pet Enabled</label>
+          <p>Show or hide the bear and all page effects.</p>
+        </div>
+        <input id="petEnabled" type="checkbox">
+      </section>
+
+      <section class="setting">
+        <label for="chaosOccurrence">Text/Image Chaos Intensity</label>
+        <p>How often text and image corruption triggers.</p>
+        <div class="control-row">
+          <input id="chaosOccurrence" type="range" min="0" max="200" step="5">
+          <output id="chaosOccurrenceValue" for="chaosOccurrence"></output>
+        </div>
+      </section>
+
+      <section class="setting">
+        <label for="twitchOccurrence">Twitch Intensity</label>
+        <p>How often layout twitch pulses show up.</p>
+        <div class="control-row">
+          <input id="twitchOccurrence" type="range" min="0" max="200" step="5">
+          <output id="twitchOccurrenceValue" for="twitchOccurrence"></output>
+        </div>
+      </section>
+
+      <section class="setting">
+        <label for="flashOccurrence">Flash Intensity</label>
+        <p>How often red hide/show flashes appear.</p>
+        <div class="control-row">
+          <input id="flashOccurrence" type="range" min="0" max="200" step="5">
+          <output id="flashOccurrenceValue" for="flashOccurrence"></output>
+        </div>
+      </section>
+
+      <section class="setting">
+        <label for="decayIntervalMs">Happiness Drop Interval</label>
+        <p>Lower values make happiness fall faster.</p>
+        <div class="control-row">
+          <input id="decayIntervalMs" type="range" min="300" max="5000" step="100">
+          <output id="decayIntervalMsValue" for="decayIntervalMs"></output>
+        </div>
+      </section>
+
+      <section class="setting">
+        <label for="feedingMinCooldownMs">Minimum Apple Wait</label>
+        <p>Shortest delay before another apple request can happen.</p>
+        <div class="control-row">
+          <input id="feedingMinCooldownMs" type="range" min="5000" max="60000" step="1000">
+          <output id="feedingMinCooldownMsValue" for="feedingMinCooldownMs"></output>
+        </div>
+      </section>
+
+      <section class="setting">
+        <label for="clickGain">Petting Happiness Gain</label>
+        <p>How much happiness each click gives the bear.</p>
+        <div class="control-row">
+          <input id="clickGain" type="range" min="1" max="30" step="1">
+          <output id="clickGainValue" for="clickGain"></output>
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

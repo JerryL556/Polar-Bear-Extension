@@ -1,0 +1,84 @@
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #f6f1e6 0%, #ece3d2 100%);
+  color: #2a2118;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+.panel {
+  width: 340px;
+  padding: 16px;
+}
+
+.panel-header {
+  margin-bottom: 12px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #866b4b;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.setting {
+  padding: 12px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  background: rgba(255, 252, 245, 0.86);
+  box-shadow: 0 8px 20px rgba(74, 51, 23, 0.08);
+}
+
+.setting label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.setting p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #6c5640;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #b53a2d;
+}
+
+output {
+  min-width: 64px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  color: #513b28;
+}

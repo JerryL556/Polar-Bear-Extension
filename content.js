@@ -57,7 +57,7 @@
           "LOOK AT ME"
         ],
         redBlink: {
-          chancePerCheck: 0.2,
+          chancePerCheck: 0.32,
           pulseCount: 4,
           minStartDelayMs: 0,
           maxStartDelayMs: 500,
@@ -89,7 +89,7 @@
           "STARVING HUNGER"
         ],
         redBlink: {
-          chancePerCheck: 0.38,
+          chancePerCheck: 0.58,
           pulseCount: 9,
           minStartDelayMs: 0,
           maxStartDelayMs: 320,
@@ -115,7 +115,19 @@
     ]
   };
 
+  const SETTINGS_KEY = "petSettings";
+  const DEFAULT_SETTINGS = {
+    petEnabled: true,
+    chaosOccurrence: 100,
+    twitchOccurrence: 100,
+    flashOccurrence: 100,
+    decayIntervalMs: CONFIG.decayIntervalMs,
+    feedingMinCooldownMs: CONFIG.feedingMinCooldownMs,
+    clickGain: CONFIG.clickGain
+  };
+
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const activeSettings = { ...DEFAULT_SETTINGS };
 
   const host = document.createElement("div");
   host.id = "extension-pet-host";
@@ -318,7 +330,7 @@
     appleX: 0,
     appleY: 0,
     draggingApple: false,
-    nextFeedingAllowedAt: performance.now() + CONFIG.feedingMinCooldownMs + Math.random() * CONFIG.feedingExtraCooldownMs,
+    nextFeedingAllowedAt: performance.now() + DEFAULT_SETTINGS.feedingMinCooldownMs + Math.random() * CONFIG.feedingExtraCooldownMs,
     activePointerId: null,
     dragOffsetX: 0,
     dragOffsetY: 0,
@@ -328,7 +340,37 @@
     chaosTimers: [],
     layoutDriftAnimations: [],
     activeRedBlinkPulses: 0,
-    activeChaosMutations: 0
+    activeChaosMutations: 0,
+    decayTimerId: null
+  };
+
+  const getOccurrenceMultiplier = (key) => clamp((activeSettings[key] ?? 100) / 100, 0, 2);
+  const scaleCount = (value, key) => Math.max(0, Math.round(value * getOccurrenceMultiplier(key)));
+  const scaleChance = (value, key) => clamp(value * getOccurrenceMultiplier(key), 0, 1);
+
+  const applyPetEnabledState = () => {
+    const enabled = activeSettings.petEnabled;
+    host.style.display = enabled ? "" : "none";
+
+    if (enabled) {
+      renderApple();
+      updateHud();
+      return;
+    }
+
+    clearFeedingTimeout();
+    state.feeding = false;
+    state.draggingApple = false;
+    state.appleVisible = false;
+    renderApple();
+    restoreChaos();
+  };
+
+  const setNextFeedingCooldown = () => {
+    state.nextFeedingAllowedAt =
+      performance.now() +
+      activeSettings.feedingMinCooldownMs +
+      Math.random() * CONFIG.feedingExtraCooldownMs;
   };
 
   const getMood = () => {
@@ -500,6 +542,38 @@
     state.chaosRestorers = [];
   };
 
+  const startDecayLoop = () => {
+    if (state.decayTimerId !== null) {
+      window.clearInterval(state.decayTimerId);
+    }
+
+    state.decayTimerId = window.setInterval(() => {
+      if (!activeSettings.petEnabled) {
+        return;
+      }
+
+      const decay = state.feeding
+        ? CONFIG.decayPerTick * CONFIG.feedingDecayMultiplier
+        : CONFIG.decayPerTick;
+      setHappiness(state.happiness - decay);
+
+      const chaosConfig = getChaosLevelConfig();
+      if (
+        chaosConfig?.redBlink &&
+        Math.random() < scaleChance(chaosConfig.redBlink.chancePerCheck, "flashOccurrence")
+      ) {
+        startRedBlinkPulse(chaosConfig);
+      }
+
+      if (
+        chaosConfig &&
+        Math.random() < scaleChance(chaosConfig.chancePerCheck, "chaosOccurrence")
+      ) {
+        triggerChaos();
+      }
+    }, activeSettings.decayIntervalMs);
+  };
+
   const stopLayoutDrift = () => {
     for (const animation of state.layoutDriftAnimations) {
       animation.cancel();
@@ -509,7 +583,12 @@
 
   const startLayoutDrift = (chaosConfig) => {
     const drift = chaosConfig.layoutDrift;
-    if (!drift || typeof document.documentElement.animate !== "function" || !document.body) {
+    if (
+      !drift ||
+      typeof document.documentElement.animate !== "function" ||
+      !document.body ||
+      scaleCount(drift.pulseCount ?? 0, "twitchOccurrence") <= 0
+    ) {
       return;
     }
 
@@ -576,7 +655,7 @@
 
     const selectedTargets = driftTargets
       .slice(0, Math.min(drift.elementCount, driftTargets.length))
-      .slice(0, Math.min(drift.pulseCount ?? drift.elementCount, driftTargets.length));
+      .slice(0, Math.min(scaleCount(drift.pulseCount ?? drift.elementCount, "twitchOccurrence"), driftTargets.length));
 
     const elementAnimations = selectedTargets.map((element) => {
       const amplitude = drift.elementAmplitudePx * (0.55 + Math.random() * 0.7);
@@ -776,8 +855,8 @@
     }
 
     const targetCount = clamp(
-      Math.ceil(targets.length * chaosConfig.targetRatio),
-      Math.min(chaosConfig.minTargets, targets.length),
+      Math.ceil(targets.length * clamp(chaosConfig.targetRatio * getOccurrenceMultiplier("chaosOccurrence"), 0, 1)),
+      Math.min(scaleCount(chaosConfig.minTargets, "chaosOccurrence"), targets.length),
       targets.length
     );
 
@@ -820,6 +899,9 @@
   };
 
   const triggerLayoutDriftPulse = (chaosConfig) => {
+    if (Math.random() > getOccurrenceMultiplier("twitchOccurrence")) {
+      return;
+    }
     startLayoutDrift(chaosConfig);
   };
 
@@ -880,11 +962,11 @@
 
   const startRedBlinkPulse = (chaosConfig) => {
     const blink = chaosConfig.redBlink;
-    if (!blink || !document.body) {
+    if (!blink || !document.body || scaleCount(blink.pulseCount, "flashOccurrence") <= 0) {
       return;
     }
 
-    const targets = collectRedBlinkTargets(blink.pulseCount);
+    const targets = collectRedBlinkTargets(scaleCount(blink.pulseCount, "flashOccurrence"));
     for (const element of targets) {
       const startDelay = Math.round(
         blink.minStartDelayMs + Math.random() * Math.max(0, blink.maxStartDelayMs - blink.minStartDelayMs)
@@ -1052,11 +1134,11 @@
 
   const triggerChaos = () => {
     const chaosConfig = getChaosLevelConfig();
-    if (!chaosConfig) {
+    if (!chaosConfig || !activeSettings.petEnabled) {
       return;
     }
 
-    if (state.activeChaosMutations >= chaosConfig.maxConcurrentMutations) {
+    if (state.activeChaosMutations >= scaleCount(chaosConfig.maxConcurrentMutations, "chaosOccurrence")) {
       return;
     }
 
@@ -1082,7 +1164,7 @@
       );
 
       scheduleChaosTimer(() => {
-        if (state.activeChaosMutations >= chaosConfig.maxConcurrentMutations) {
+        if (state.activeChaosMutations >= scaleCount(chaosConfig.maxConcurrentMutations, "chaosOccurrence")) {
           return;
         }
         state.activeChaosMutations += 1;
@@ -1102,10 +1184,7 @@
     clearFeedingTimeout();
     state.feeding = false;
     state.draggingApple = false;
-    state.nextFeedingAllowedAt =
-      performance.now() +
-      CONFIG.feedingMinCooldownMs +
-      Math.random() * CONFIG.feedingExtraCooldownMs;
+    setNextFeedingCooldown();
     if (state.activePointerId !== null) {
       apple.releasePointerCapture?.(state.activePointerId);
       state.activePointerId = null;
@@ -1119,6 +1198,7 @@
 
   const tryStartFeeding = (now) => {
     if (
+      !activeSettings.petEnabled ||
       state.feeding ||
       now < state.nextFeedingAllowedAt ||
       Math.random() >= CONFIG.feedingChance
@@ -1145,6 +1225,10 @@
   };
 
   const scheduleNextAction = (now) => {
+    if (!activeSettings.petEnabled) {
+      return;
+    }
+
     if (tryStartFeeding(now)) {
       return;
     }
@@ -1165,6 +1249,11 @@
   const animate = (now) => {
     const deltaSeconds = Math.min((now - state.lastFrameTime) / 1000, 0.05);
     state.lastFrameTime = now;
+
+    if (!activeSettings.petEnabled) {
+      requestAnimationFrame(animate);
+      return;
+    }
 
     if (!state.feeding && now >= state.actionUntil) {
       scheduleNextAction(now);
@@ -1195,34 +1284,15 @@
   };
 
   pet.addEventListener("click", () => {
-    setHappiness(state.happiness + CONFIG.clickGain);
+    if (!activeSettings.petEnabled) {
+      return;
+    }
+    setHappiness(state.happiness + activeSettings.clickGain);
     petVisual.style.transform = `scaleX(${state.direction < 0 ? 1 : -1}) scale(1.08)`;
     window.setTimeout(() => {
       petVisual.style.transform = `scaleX(${state.direction < 0 ? 1 : -1})`;
     }, 140);
   });
-
-  window.setInterval(() => {
-    const decay = state.feeding
-      ? CONFIG.decayPerTick * CONFIG.feedingDecayMultiplier
-      : CONFIG.decayPerTick;
-    setHappiness(state.happiness - decay);
-
-    const chaosConfig = getChaosLevelConfig();
-    if (
-      chaosConfig?.redBlink &&
-      Math.random() < chaosConfig.redBlink.chancePerCheck
-    ) {
-      startRedBlinkPulse(chaosConfig);
-    }
-
-    if (
-      chaosConfig &&
-      Math.random() < chaosConfig.chancePerCheck
-    ) {
-      triggerChaos();
-    }
-  }, CONFIG.decayIntervalMs);
 
   const isPointOverPet = (x, y) => {
     const petLeft = state.x - CONFIG.appleDropPadding;
@@ -1239,7 +1309,7 @@
   };
 
   const tryFeedBear = () => {
-    if (!state.feeding || !state.appleVisible) {
+    if (!activeSettings.petEnabled || !state.feeding || !state.appleVisible) {
       return false;
     }
 
@@ -1321,6 +1391,30 @@
   window.addEventListener("pointerup", finishAppleDrag, true);
   window.addEventListener("pointercancel", cancelAppleDrag, true);
 
+  const applySettings = (nextSettings) => {
+    Object.assign(activeSettings, DEFAULT_SETTINGS, nextSettings ?? {});
+    setNextFeedingCooldown();
+    applyPetEnabledState();
+    startDecayLoop();
+  };
+
+  const loadSettings = async () => {
+    try {
+      const stored = await chrome.storage.sync.get(SETTINGS_KEY);
+      applySettings(stored[SETTINGS_KEY]);
+    } catch {
+      applySettings();
+    }
+  };
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "sync" || !changes[SETTINGS_KEY]) {
+      return;
+    }
+
+    applySettings(changes[SETTINGS_KEY].newValue);
+  });
+
   window.addEventListener("resize", () => {
     renderPosition();
     if (state.appleVisible) {
@@ -1335,5 +1429,8 @@
   renderPosition();
   renderApple();
   scheduleNextAction(performance.now());
+  applyPetEnabledState();
+  startDecayLoop();
+  void loadSettings();
   requestAnimationFrame(animate);
 })();

@@ -3,6 +3,13 @@
   "name": "Extension Pet",
   "version": "1.0.0",
   "description": "A bottom-of-page pet with a happiness meter and mood-based behavior.",
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Polar Bear Settings"
+  },
   "content_scripts": [
     {
       "matches": [
