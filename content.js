@@ -303,6 +303,9 @@
 
   const appleUrl = chrome.runtime.getURL("apple.webp");
   const rottenAppleUrl = chrome.runtime.getURL("rotten-apple.png");
+  const level2aUrl = chrome.runtime.getURL("level2a.webp");
+  const level3aUrl = chrome.runtime.getURL("level3a.jpg");
+  const level3bUrl = chrome.runtime.getURL("level3b.jpg");
   const shell = shadow.querySelector(".pet-shell");
   const pet = shadow.querySelector(".pet");
   const petVisual = shadow.querySelector(".pet-visual");
@@ -758,6 +761,21 @@
     return appleUrl;
   };
 
+  const pickChaosImageUrl = () => {
+    const chaosConfig = getChaosLevelConfig();
+    if (chaosConfig === CONFIG.chaosLevels.level3) {
+      const pool = [rottenAppleUrl, level3aUrl, level3bUrl];
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    if (chaosConfig === CONFIG.chaosLevels.level2) {
+      const pool = [rottenAppleUrl, level2aUrl];
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    return appleUrl;
+  };
+
   const collectChaosTargets = (chaosConfig) => {
     const targets = [];
     const seen = new Set();
@@ -1079,7 +1097,7 @@
           image.style.width = `${Math.round(rect.width)}px`;
           image.style.height = `${Math.round(rect.height)}px`;
           image.style.objectFit = "contain";
-          image.setAttribute("src", getActiveAppleUrl());
+          image.setAttribute("src", pickChaosImageUrl());
           image.removeAttribute("srcset");
           image.removeAttribute("sizes");
         },
@@ -1278,7 +1296,15 @@
   };
 
   const setHappiness = (nextValue) => {
+    const previousHappiness = state.happiness;
     state.happiness = clamp(nextValue, CONFIG.minHappiness, CONFIG.maxHappiness);
+
+    const crossedAboveLevel2 = previousHappiness <= 30 && state.happiness > 30;
+    const crossedAboveLevel1 = previousHappiness <= 60 && state.happiness > 60;
+    if (crossedAboveLevel2 || crossedAboveLevel1) {
+      restoreChaos();
+    }
+
     updateMoodStyles();
     updateHud();
   };

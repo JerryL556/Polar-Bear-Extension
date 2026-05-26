@@ -26,7 +26,10 @@
       "resources": [
         "walking-polar-bear.gif",
         "apple.webp",
-        "rotten-apple.png"
+        "rotten-apple.png",
+        "level2a.webp",
+        "level3a.jpg",
+        "level3b.jpg"
       ],
       "matches": [
         "<all_urls>"
