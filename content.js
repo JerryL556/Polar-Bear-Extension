@@ -8,7 +8,7 @@
     startHappiness: 80,
     minHappiness: 0,
     maxHappiness: 100,
-    decayPerTick: 2,
+    decayPerTick: 1,
     decayIntervalMs: 900,
     feedingDecayMultiplier: 3,
     clickGain: 8,
@@ -42,6 +42,8 @@
     gameRewardPerCatch: 5,
     gameFollowSpeed: 2,
     gameResultMessageMs: 2200,
+    sleepZzzIntervalMs: 900,
+    scoreHeartLifetimeMs: 1100,
     appleDropPadding: 64,
     chaosLevels: {
       level1: {
@@ -202,6 +204,45 @@
         height: 100%;
         transform-origin: center center;
         transition: transform 180ms ease;
+      }
+
+      .pet-effects {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 2;
+      }
+
+      .sleep-zzz {
+        position: absolute;
+        right: 6px;
+        top: -6px;
+        color: rgba(123, 208, 255, 0.96);
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        text-shadow:
+          0 0 10px rgba(118, 212, 255, 0.55),
+          0 2px 8px rgba(16, 49, 88, 0.3);
+        animation: sleepZzzFloat 1.35s ease-out forwards;
+      }
+
+      .score-heart {
+        position: absolute;
+        left: 50%;
+        top: 18px;
+        color: rgba(255, 84, 126, 0.98);
+        font-family: Arial, sans-serif;
+        font-size: 24px;
+        font-weight: 900;
+        line-height: 1;
+        text-shadow:
+          0 0 10px rgba(255, 128, 168, 0.46),
+          0 3px 10px rgba(121, 23, 48, 0.22);
+        transform: translate(-50%, 0);
+        animation: scoreHeartFloat 1.1s ease-out forwards;
       }
 
       .pet:active .pet-visual {
@@ -415,6 +456,34 @@
         0%, 100% { transform: translateY(0); }
         50% { transform: translateY(-4px); }
       }
+
+      @keyframes sleepZzzFloat {
+        0% {
+          opacity: 0;
+          transform: translate(0, 12px) scale(0.64);
+        }
+        18% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate(28px, -40px) scale(1.18);
+        }
+      }
+
+      @keyframes scoreHeartFloat {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, 10px) scale(0.72);
+        }
+        20% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate(calc(-50% + var(--drift-x, 0px)), -34px) scale(1.18);
+        }
+      }
     </style>
     <div class="pet-layer">
       <div class="pet-shell">
@@ -444,6 +513,7 @@
             <img class="pet-still hidden" alt="Frozen pet">
           </div>
         </div>
+        <div class="pet-effects"></div>
       </div>
       <div class="game-ui hidden">
         <span class="game-score">Caught: 0</span>
@@ -481,6 +551,7 @@
   const gameTime = shadow.querySelector(".game-time");
   const gameResult = shadow.querySelector(".game-result");
   const gameApplesLayer = shadow.querySelector(".game-apples");
+  const petEffects = shadow.querySelector(".pet-effects");
 
   apple.src = appleUrl;
 
@@ -503,6 +574,7 @@
     pettingPointerState: "idle",
     pettingBounceTimeoutId: null,
     pettingBounceActive: false,
+    sleepZzzTimerId: null,
     menuOpen: false,
     gameActive: false,
     gameTimerId: null,
@@ -598,6 +670,7 @@
       window.clearTimeout(state.pettingBounceTimeoutId);
       state.pettingBounceTimeoutId = null;
     }
+    stopSleepEffects();
     endGame(false);
     state.feeding = false;
     state.sleeping = false;
@@ -719,6 +792,64 @@
     gameUi.classList.toggle("hidden", !state.gameActive);
     gameScore.textContent = `Caught: ${state.gameCaughtCount}`;
     gameTime.textContent = `${Math.max(0, Math.ceil(state.gameTimeRemainingMs / 1000))}s`;
+  };
+
+  const clearPetEffects = () => {
+    petEffects.replaceChildren();
+  };
+
+  const spawnSleepZzz = () => {
+    if (!state.sleeping) {
+      return;
+    }
+
+    const zzz = document.createElement("span");
+    zzz.className = "sleep-zzz";
+    zzz.textContent = ["Z", "ZZ", "ZZZ"][Math.floor(Math.random() * 3)];
+    zzz.style.right = `${6 + Math.random() * 14}px`;
+    zzz.style.top = `${-10 + Math.random() * 12}px`;
+    zzz.style.animationDuration = `${1.15 + Math.random() * 0.5}s`;
+    petEffects.appendChild(zzz);
+    window.setTimeout(() => {
+      zzz.remove();
+    }, 1800);
+  };
+
+  const startSleepEffects = () => {
+    if (state.sleepZzzTimerId !== null) {
+      window.clearInterval(state.sleepZzzTimerId);
+    }
+    spawnSleepZzz();
+    state.sleepZzzTimerId = window.setInterval(() => {
+      spawnSleepZzz();
+    }, CONFIG.sleepZzzIntervalMs);
+  };
+
+  const stopSleepEffects = () => {
+    if (state.sleepZzzTimerId !== null) {
+      window.clearInterval(state.sleepZzzTimerId);
+      state.sleepZzzTimerId = null;
+    }
+    clearPetEffects();
+  };
+
+  const spawnScoreHearts = (count = 1) => {
+    const total = Math.max(1, count);
+    for (let index = 0; index < total; index += 1) {
+      const heart = document.createElement("span");
+      heart.className = "score-heart";
+      heart.textContent = "♥";
+      heart.style.left = `${40 + Math.random() * 28}%`;
+      heart.style.top = `${18 + Math.random() * 28}px`;
+      heart.style.fontSize = `${20 + Math.random() * 10}px`;
+      heart.style.setProperty("--drift-x", `${Math.round((Math.random() - 0.5) * 36)}px`);
+      heart.style.animationDelay = `${index * 50}ms`;
+      heart.style.animationDuration = `${0.9 + Math.random() * 0.35}s`;
+      petEffects.appendChild(heart);
+      window.setTimeout(() => {
+        heart.remove();
+      }, CONFIG.scoreHeartLifetimeMs + index * 50);
+    }
   };
 
   const triggerPetBounce = () => {
@@ -1673,6 +1804,7 @@
     }
     state.sleeping = false;
     state.sleepTicksRemaining = 0;
+    stopSleepEffects();
     if (!state.menuOpen && !state.feeding) {
       unfreezePet();
     }
@@ -1692,6 +1824,7 @@
     state.action = "idle";
     state.sleepTicksRemaining = Math.floor(CONFIG.sleepDurationMs / CONFIG.sleepTickMs);
     freezePet();
+    startSleepEffects();
     renderPosition();
     updateActionMenuState();
     updateHud();
@@ -1824,6 +1957,7 @@
         if (caught) {
           state.gameCaughtCount += 1;
           updateGameUi();
+          spawnScoreHearts(1);
           appleState.el.remove();
           return false;
         }
@@ -1856,14 +1990,14 @@
   };
 
   pet.addEventListener("click", () => {
-    if (!activeSettings.petEnabled || state.menuOpen || state.sleeping || state.feeding || state.petting) {
+    if (!activeSettings.petEnabled || state.sleeping || state.feeding || state.petting) {
       return;
     }
-    setHappiness(state.happiness + activeSettings.clickGain);
-    petVisual.style.transform = `scaleX(${state.direction < 0 ? 1 : -1}) scale(1.08)`;
-    window.setTimeout(() => {
-      petVisual.style.transform = `scaleX(${state.direction < 0 ? 1 : -1})`;
-    }, 140);
+    if (state.menuOpen) {
+      closeActionMenu();
+      return;
+    }
+    openActionMenu();
   });
 
   const isPointOverPet = (x, y) => {
@@ -1945,6 +2079,7 @@
         state.pettingPointerState = "touching";
         state.pettingScore += 1;
         triggerPetBounce();
+        spawnScoreHearts(1);
         showGameResult(`Pet score: ${state.pettingScore}`);
       } else if (!insideHorizontal || event.clientY < aboveZoneTop || event.clientY > touchZoneBottom) {
         if (state.pettingPointerState === "touching") {
@@ -2022,7 +2157,7 @@
     if (!state.menuOpen) {
       return;
     }
-    if (path.includes(actionMenu) || path.includes(menuToggle)) {
+    if (path.includes(actionMenu) || path.includes(menuToggle) || path.includes(pet)) {
       return;
     }
     closeActionMenu();
