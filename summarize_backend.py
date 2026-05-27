@@ -15,8 +15,8 @@ load_dotenv(BASE_DIR / ".env")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 PORT = int(os.getenv("SUMMARY_SERVER_PORT", "4317"))
 MAX_TEXT_CHARS = 5000
-SUMMARY_MAX_OUTPUT_TOKENS = 400
-FACT_CHECK_MAX_OUTPUT_TOKENS = 700
+SUMMARY_MAX_OUTPUT_TOKENS = 1200
+FACT_CHECK_MAX_OUTPUT_TOKENS = 2000
 
 api_key = os.getenv("OPENAI_API_KEY", "").strip()
 if not api_key:
