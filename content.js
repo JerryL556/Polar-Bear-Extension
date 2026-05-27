@@ -44,6 +44,8 @@
     gameResultMessageMs: 2200,
     sleepZzzIntervalMs: 900,
     scoreHeartLifetimeMs: 1100,
+    summaryMinHappiness: 30,
+    summaryMaxChars: 5000,
     appleDropPadding: 64,
     chaosLevels: {
       level1: {
@@ -261,6 +263,10 @@
         display: none;
       }
 
+      .pet.accepting-drop {
+        filter: drop-shadow(0 0 18px rgba(120, 212, 255, 0.7));
+      }
+
       .apple {
         position: fixed;
         width: ${CONFIG.appleSize}px;
@@ -336,6 +342,93 @@
 
       .action-menu.hidden {
         display: none;
+      }
+
+      .summary-bubble {
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 12px);
+        transform: translateX(-50%);
+        min-width: 190px;
+        max-width: 280px;
+        padding: 12px 12px 10px;
+        border-radius: 16px;
+        background: rgba(34, 38, 44, 0.96);
+        color: #ffffff;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.45;
+        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.3);
+        pointer-events: auto;
+        z-index: 4;
+      }
+
+      .summary-bubble::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -8px;
+        width: 16px;
+        height: 16px;
+        background: rgba(34, 38, 44, 0.96);
+        transform: translateX(-50%) rotate(45deg);
+        border-radius: 4px;
+      }
+
+      .summary-bubble.hidden {
+        display: none;
+      }
+
+      .summary-body {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .summary-sources {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-top: 10px;
+      }
+
+      .summary-sources.hidden {
+        display: none;
+      }
+
+      .summary-source-link {
+        color: #99d6ff;
+        text-decoration: underline;
+        font-size: 11px;
+      }
+
+      .summary-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .summary-actions.hidden {
+        display: none;
+      }
+
+      .summary-button {
+        flex: 1 1 0;
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.12);
+        color: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .summary-button.primary {
+        background: rgba(91, 217, 114, 0.22);
+      }
+
+      .summary-button.secondary {
+        background: rgba(120, 212, 255, 0.18);
       }
 
       .menu-row {
@@ -507,7 +600,16 @@
             <button class="menu-button action-close" type="button">Close</button>
           </div>
         </div>
-        <div class="pet" title="Click to cheer up the pet">
+        <div class="summary-bubble hidden" aria-live="polite">
+          <div class="summary-body"></div>
+          <div class="summary-sources hidden"></div>
+          <div class="summary-actions hidden">
+            <button class="summary-button primary summary-confirm" type="button">Summarize</button>
+            <button class="summary-button secondary summary-fact-check" type="button">Fact Check</button>
+            <button class="summary-button summary-cancel" type="button">Cancel</button>
+          </div>
+        </div>
+        <div class="pet" title="Open pet menu or drop highlighted text here">
           <div class="pet-visual">
             <img src="${gifUrl}" alt="Extension pet">
             <img class="pet-still hidden" alt="Frozen pet">
@@ -546,6 +648,13 @@
   const playButton = shadow.querySelector(".action-play");
   const petButton = shadow.querySelector(".action-pet");
   const closeButton = shadow.querySelector(".action-close");
+  const summaryBubble = shadow.querySelector(".summary-bubble");
+  const summaryBody = shadow.querySelector(".summary-body");
+  const summarySources = shadow.querySelector(".summary-sources");
+  const summaryActions = shadow.querySelector(".summary-actions");
+  const summaryConfirmButton = shadow.querySelector(".summary-confirm");
+  const summaryFactCheckButton = shadow.querySelector(".summary-fact-check");
+  const summaryCancelButton = shadow.querySelector(".summary-cancel");
   const gameUi = shadow.querySelector(".game-ui");
   const gameScore = shadow.querySelector(".game-score");
   const gameTime = shadow.querySelector(".game-time");
@@ -576,6 +685,10 @@
     pettingBounceActive: false,
     sleepZzzTimerId: null,
     menuOpen: false,
+    summaryMode: "hidden",
+    pendingSummaryText: "",
+    pendingSummaryAction: "summarize",
+    dragSummaryText: "",
     gameActive: false,
     gameTimerId: null,
     gameSpawnTimerId: null,
@@ -606,7 +719,14 @@
   const getOccurrenceMultiplier = (key) => clamp((activeSettings[key] ?? 100) / 100, 0, 2);
   const scaleCount = (value, key) => Math.max(0, Math.round(value * getOccurrenceMultiplier(key)));
   const scaleChance = (value, key) => clamp(value * getOccurrenceMultiplier(key), 0, 1);
-  const isBearPaused = () => state.feeding || state.menuOpen || state.sleeping || state.gameActive || state.petting;
+  const isSummaryBubbleVisible = () => state.summaryMode !== "hidden";
+  const isBearPaused = () => state.feeding || state.menuOpen || isSummaryBubbleVisible() || state.sleeping || state.gameActive || state.petting;
+
+  const maybeResumePet = () => {
+    if (!state.feeding && !state.sleeping && !state.gameActive && !state.petting && !state.menuOpen && !isSummaryBubbleVisible()) {
+      unfreezePet();
+    }
+  };
 
   const updateActionMenuState = () => {
     actionMenu.classList.toggle("hidden", !state.menuOpen);
@@ -627,10 +747,125 @@
           : "menu";
   };
 
+  const normalizeSummaryText = (text) => String(text || "").replace(/\s+/g, " ").trim();
+
+  const renderSummarySources = (sources = []) => {
+    summarySources.replaceChildren();
+    if (!sources.length) {
+      summarySources.classList.add("hidden");
+      return;
+    }
+
+    for (const source of sources) {
+      const link = document.createElement("a");
+      link.className = "summary-source-link";
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = source.title || source.url;
+      summarySources.appendChild(link);
+    }
+
+    summarySources.classList.remove("hidden");
+  };
+
+  const showSummaryBubble = (mode, text, options = {}) => {
+    state.summaryMode = mode;
+    summaryBody.textContent = text;
+    summaryBubble.classList.remove("hidden");
+    const showActions = mode === "confirm";
+    summaryActions.classList.toggle("hidden", !showActions);
+    summaryConfirmButton.disabled = mode === "loading";
+    summaryFactCheckButton.disabled = mode === "loading";
+    summaryCancelButton.disabled = mode === "loading";
+    renderSummarySources(options.sources ?? []);
+    if (options.pendingText !== undefined) {
+      state.pendingSummaryText = options.pendingText;
+    }
+    if (options.pendingAction !== undefined) {
+      state.pendingSummaryAction = options.pendingAction;
+    }
+    freezePet();
+  };
+
+  const hideSummaryBubble = () => {
+    state.summaryMode = "hidden";
+    state.pendingSummaryText = "";
+    state.pendingSummaryAction = "summarize";
+    summaryBody.textContent = "";
+    summaryBubble.classList.add("hidden");
+    summaryActions.classList.add("hidden");
+    renderSummarySources([]);
+    maybeResumePet();
+  };
+
+  const requestSummaryFromBackend = (text, mode) => new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: "analyzeSelectedText", text, mode },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response ?? { ok: false, error: "No response from summary worker." });
+      }
+    );
+  });
+
+  const startSummaryRequest = async (mode) => {
+    const text = state.pendingSummaryText;
+    if (!text) {
+      hideSummaryBubble();
+      return;
+    }
+    if (state.happiness < CONFIG.summaryMinHappiness) {
+      showSummaryBubble("refusal", "Too hungry to think clearly. Feed me before I analyze anything.");
+      return;
+    }
+
+    state.pendingSummaryAction = mode;
+    const loadingText = mode === "fact_check" ? "Fact-checking..." : "Summarizing...";
+    showSummaryBubble("loading", loadingText);
+    const response = await requestSummaryFromBackend(text, mode);
+    if (!response?.ok || !response.summary) {
+      const fallback = mode === "fact_check"
+        ? "The bear could not fact-check that text."
+        : "The bear could not summarize that text.";
+      showSummaryBubble("error", response?.error || fallback);
+      return;
+    }
+
+    showSummaryBubble("result", response.summary, { sources: response.sources ?? [] });
+  };
+
+  const prepareSummaryRequest = (rawText) => {
+    const normalized = normalizeSummaryText(rawText);
+    if (!normalized) {
+      return;
+    }
+
+    closeActionMenu();
+    const truncated = normalized.slice(0, CONFIG.summaryMaxChars);
+    if (state.happiness < CONFIG.summaryMinHappiness) {
+      showSummaryBubble("refusal", "Too hungry to think clearly. Feed me before I analyze anything.");
+      return;
+    }
+
+    const truncatedNotice = normalized.length > CONFIG.summaryMaxChars
+      ? ` I will only use the first ${CONFIG.summaryMaxChars} characters.`
+      : "";
+    showSummaryBubble(
+      "confirm",
+      `What should I do with this text?${truncatedNotice}`,
+      { pendingText: truncated, pendingAction: "summarize" }
+    );
+  };
+
   const openActionMenu = () => {
     if (state.feeding || state.gameActive) {
       return;
     }
+    hideSummaryBubble();
     state.menuOpen = true;
     freezePet();
     updateActionMenuState();
@@ -639,9 +874,7 @@
 
   const closeActionMenu = () => {
     state.menuOpen = false;
-    if (!state.feeding && !state.sleeping) {
-      unfreezePet();
-    }
+    maybeResumePet();
     updateActionMenuState();
   };
 
@@ -676,9 +909,14 @@
     state.sleeping = false;
     state.petting = false;
     state.menuOpen = false;
+    state.summaryMode = "hidden";
+    state.pendingSummaryText = "";
+    state.pendingSummaryAction = "summarize";
+    state.dragSummaryText = "";
     state.draggingApple = false;
     state.appleVisible = false;
     renderApple();
+    hideSummaryBubble();
     restoreChaos();
     updateActionMenuState();
   };
@@ -961,9 +1199,7 @@
 
     showGameResult(`Caught ${caughtCount} apples, +${reward} happiness`);
 
-    if (!state.menuOpen && !state.feeding && !state.sleeping) {
-      unfreezePet();
-    }
+    maybeResumePet();
     updateActionMenuState();
     scheduleNextAction(performance.now());
   };
@@ -978,9 +1214,7 @@
     const finalScore = state.pettingScore;
     state.pettingScore = 0;
     state.pettingPointerState = "idle";
-    if (!state.menuOpen && !state.feeding && !state.sleeping && !state.gameActive) {
-      unfreezePet();
-    }
+    maybeResumePet();
     renderPosition();
     if (reward > 0) {
       setHappiness(state.happiness + reward);
@@ -1788,9 +2022,7 @@
       state.activePointerId = null;
     }
     state.appleVisible = false;
-    if (!state.menuOpen && !state.sleeping) {
-      unfreezePet();
-    }
+    maybeResumePet();
     renderApple();
     updateHud();
     updateActionMenuState();
@@ -1805,9 +2037,7 @@
     state.sleeping = false;
     state.sleepTicksRemaining = 0;
     stopSleepEffects();
-    if (!state.menuOpen && !state.feeding) {
-      unfreezePet();
-    }
+    maybeResumePet();
     renderPosition();
     updateHud();
     updateActionMenuState();
@@ -2042,6 +2272,60 @@
     tryFeedBear();
   };
 
+  const clearDraggedSummaryText = () => {
+    state.dragSummaryText = "";
+    pet.classList.remove("accepting-drop");
+  };
+
+  const captureDraggedSummaryText = (event) => {
+    if (host.contains(event.target)) {
+      clearDraggedSummaryText();
+      return;
+    }
+
+    const selectedText = normalizeSummaryText(window.getSelection()?.toString() || "");
+    if (!selectedText) {
+      clearDraggedSummaryText();
+      return;
+    }
+
+    state.dragSummaryText = selectedText;
+    event.dataTransfer?.setData("text/plain", selectedText);
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
+  const handleSummaryDragOver = (event) => {
+    if (state.feeding || state.sleeping || state.gameActive || state.petting) {
+      return;
+    }
+
+    const draggedText = state.dragSummaryText || normalizeSummaryText(event.dataTransfer?.getData("text/plain") || "");
+    if (!draggedText) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+    pet.classList.add("accepting-drop");
+  };
+
+  const handleSummaryDrop = (event) => {
+    const droppedText = state.dragSummaryText || normalizeSummaryText(event.dataTransfer?.getData("text/plain") || "");
+    clearDraggedSummaryText();
+    if (!droppedText) {
+      return;
+    }
+
+    event.preventDefault();
+    prepareSummaryRequest(droppedText);
+  };
+
+  pet.addEventListener("dragover", handleSummaryDragOver);
+  pet.addEventListener("dragleave", clearDraggedSummaryText);
+  pet.addEventListener("drop", handleSummaryDrop);
+
   apple.addEventListener("pointerdown", (event) => {
     if (!state.feeding) {
       return;
@@ -2125,6 +2409,8 @@
   window.addEventListener("pointermove", handlePointerMove, true);
   window.addEventListener("pointerup", finishAppleDrag, true);
   window.addEventListener("pointercancel", cancelAppleDrag, true);
+  document.addEventListener("dragstart", captureDraggedSummaryText, true);
+  document.addEventListener("dragend", clearDraggedSummaryText, true);
   menuToggle.addEventListener("click", (event) => {
     event.stopPropagation();
     if (state.feeding) {
@@ -2152,12 +2438,33 @@
     event.stopPropagation();
     closeActionMenu();
   });
+  summaryConfirmButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("summarize");
+  });
+  summaryFactCheckButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("fact_check");
+  });
+  summaryCancelButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    hideSummaryBubble();
+  });
+  summaryBubble.addEventListener("click", (event) => {
+    if (state.summaryMode === "confirm" || state.summaryMode === "loading") {
+      return;
+    }
+    if (event.target === summaryConfirmButton || event.target === summaryCancelButton) {
+      return;
+    }
+    hideSummaryBubble();
+  });
   shadow.addEventListener("pointerdown", (event) => {
     const path = event.composedPath();
     if (!state.menuOpen) {
       return;
     }
-    if (path.includes(actionMenu) || path.includes(menuToggle) || path.includes(pet)) {
+    if (path.includes(actionMenu) || path.includes(menuToggle) || path.includes(pet) || path.includes(summaryBubble)) {
       return;
     }
     closeActionMenu();
