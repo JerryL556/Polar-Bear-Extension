@@ -3,7 +3,7 @@ const DEFAULT_SETTINGS = {
   chaosOccurrence: 100,
   twitchOccurrence: 100,
   flashOccurrence: 100,
-  decayIntervalMs: 900,
+  decayIntervalMs: 4000,
   feedingMinCooldownMs: 10000,
   clickGain: 8
 };
@@ -37,6 +37,7 @@ const outputFields = {
   feedingMinCooldownMs: document.getElementById("feedingMinCooldownMsValue"),
   clickGain: document.getElementById("clickGainValue")
 };
+const resetDefaultsButton = document.getElementById("resetDefaults");
 
 const updateOutput = (key, value) => {
   const output = outputFields[key];
@@ -63,6 +64,10 @@ const writeSettings = async () => {
   };
 
   await chrome.storage.sync.set({ [SETTINGS_KEY]: nextSettings });
+};
+
+const writeSpecificSettings = async (settings) => {
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
 };
 
 const applySettingsToForm = (settings) => {
@@ -92,6 +97,12 @@ const bindFieldEvents = () => {
       });
     }
   }
+
+  resetDefaultsButton?.addEventListener("click", () => {
+    const nextSettings = { ...DEFAULT_SETTINGS };
+    applySettingsToForm(nextSettings);
+    void writeSpecificSettings(nextSettings);
+  });
 };
 
 const init = async () => {

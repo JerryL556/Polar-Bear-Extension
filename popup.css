@@ -82,3 +82,25 @@ output {
   font-weight: 700;
   color: #513b28;
 }
+
+.panel-actions {
+  margin-top: 12px;
+}
+
+.reset-button {
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #8e3429;
+  color: #fff7ef;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(90, 39, 25, 0.18);
+}
+
+.reset-button:hover {
+  background: #7a2d24;
+}

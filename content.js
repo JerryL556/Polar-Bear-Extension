@@ -9,7 +9,7 @@
     minHappiness: 0,
     maxHappiness: 100,
     decayPerTick: 1,
-    decayIntervalMs: 900,
+    decayIntervalMs: 4000,
     feedingDecayMultiplier: 3,
     clickGain: 8,
     appleFeedGain: 20,
