@@ -403,6 +403,7 @@
 
       .summary-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         margin-top: 10px;
       }
@@ -423,12 +424,28 @@
         cursor: pointer;
       }
 
+      .summary-button.hidden {
+        display: none;
+      }
+
       .summary-button.primary {
         background: rgba(91, 217, 114, 0.22);
       }
 
       .summary-button.secondary {
         background: rgba(120, 212, 255, 0.18);
+      }
+
+      .summary-button.copy {
+        background: rgba(255, 204, 92, 0.2);
+      }
+
+      .summary-bubble.analysis {
+        background: rgba(31, 44, 58, 0.97);
+      }
+
+      .summary-bubble.analysis::after {
+        background: rgba(31, 44, 58, 0.97);
       }
 
       .menu-row {
@@ -606,6 +623,13 @@
           <div class="summary-actions hidden">
             <button class="summary-button primary summary-confirm" type="button">Summarize</button>
             <button class="summary-button secondary summary-fact-check" type="button">Fact Check</button>
+            <button class="summary-button secondary summary-rewrite" type="button">Rewrite</button>
+            <button class="summary-button summary-style-clearer hidden" type="button">Clearer</button>
+            <button class="summary-button summary-style-shorter hidden" type="button">Shorter</button>
+            <button class="summary-button summary-style-formal hidden" type="button">More Formal</button>
+            <button class="summary-button summary-style-friendly hidden" type="button">More Friendly</button>
+            <button class="summary-button secondary summary-back hidden" type="button">Back</button>
+            <button class="summary-button copy summary-copy hidden" type="button">Copy</button>
             <button class="summary-button summary-cancel" type="button">Cancel</button>
           </div>
         </div>
@@ -654,6 +678,13 @@
   const summaryActions = shadow.querySelector(".summary-actions");
   const summaryConfirmButton = shadow.querySelector(".summary-confirm");
   const summaryFactCheckButton = shadow.querySelector(".summary-fact-check");
+  const summaryRewriteButton = shadow.querySelector(".summary-rewrite");
+  const summaryStyleClearerButton = shadow.querySelector(".summary-style-clearer");
+  const summaryStyleShorterButton = shadow.querySelector(".summary-style-shorter");
+  const summaryStyleFormalButton = shadow.querySelector(".summary-style-formal");
+  const summaryStyleFriendlyButton = shadow.querySelector(".summary-style-friendly");
+  const summaryBackButton = shadow.querySelector(".summary-back");
+  const summaryCopyButton = shadow.querySelector(".summary-copy");
   const summaryCancelButton = shadow.querySelector(".summary-cancel");
   const gameUi = shadow.querySelector(".game-ui");
   const gameScore = shadow.querySelector(".game-score");
@@ -688,7 +719,11 @@
     summaryMode: "hidden",
     pendingSummaryText: "",
     pendingSummaryAction: "summarize",
+    pendingRewriteStyle: "",
+    pendingSummaryPrompt: "",
+    bubbleOutputText: "",
     dragSummaryText: "",
+    dragSelectionContext: null,
     gameActive: false,
     gameTimerId: null,
     gameSpawnTimerId: null,
@@ -749,6 +784,135 @@
 
   const normalizeSummaryText = (text) => String(text || "").replace(/\s+/g, " ").trim();
 
+  const getEditableSelectionContext = () => {
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLTextAreaElement ||
+      (activeElement instanceof HTMLInputElement && typeof activeElement.selectionStart === "number")
+    ) {
+      const start = activeElement.selectionStart ?? 0;
+      const end = activeElement.selectionEnd ?? start;
+      if (end <= start) {
+        return null;
+      }
+      const originalText = activeElement.value.slice(start, end);
+      return {
+        kind: "input",
+        element: activeElement,
+        start,
+        end,
+        originalText
+      };
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    const anchor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    const root = anchor instanceof HTMLElement ? anchor.closest("[contenteditable='true']") : null;
+    if (!root) {
+      return null;
+    }
+
+    return {
+      kind: "contenteditable",
+      root,
+      range: range.cloneRange(),
+      originalText: normalizeSummaryText(selection.toString())
+    };
+  };
+
+  const isTextInputElement = (element) => (
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLInputElement
+  );
+
+  const findNearbySelectionRange = (value, originalText, start, end) => {
+    if (!originalText) {
+      return null;
+    }
+
+    const exactSlice = value.slice(start, end);
+    if (exactSlice === originalText) {
+      return { start, end };
+    }
+
+    const windowStart = Math.max(0, start - 120);
+    const windowEnd = Math.min(value.length, end + 120);
+    const nearbyIndex = value.indexOf(originalText, windowStart);
+    if (nearbyIndex !== -1 && nearbyIndex + originalText.length <= windowEnd) {
+      return {
+        start: nearbyIndex,
+        end: nearbyIndex + originalText.length
+      };
+    }
+
+    return null;
+  };
+
+  const applyRewriteToSelection = (replacementText) => {
+    const context = state.dragSelectionContext;
+    if (!context || !replacementText) {
+      return false;
+    }
+
+    if (context.kind === "input" && isTextInputElement(context.element) && context.element.isConnected) {
+      const currentValue = context.element.value ?? "";
+      if (context.end > currentValue.length) {
+        return false;
+      }
+      const resolvedRange = findNearbySelectionRange(
+        currentValue,
+        context.originalText,
+        context.start,
+        context.end
+      );
+      if (!resolvedRange) {
+        return false;
+      }
+      const nextValue = `${currentValue.slice(0, resolvedRange.start)}${replacementText}${currentValue.slice(resolvedRange.end)}`;
+      context.element.value = nextValue;
+      const caret = resolvedRange.start + replacementText.length;
+      context.element.setSelectionRange?.(caret, caret);
+      context.element.dispatchEvent(new Event("input", { bubbles: true }));
+      context.element.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+
+    if (context.kind === "contenteditable" && context.root?.isConnected && context.range) {
+      try {
+        const range = context.range.cloneRange();
+        range.deleteContents();
+        const textNode = document.createTextNode(replacementText);
+        range.insertNode(textNode);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          const caretRange = document.createRange();
+          caretRange.setStartAfter(textNode);
+          caretRange.collapse(true);
+          selection.addRange(caretRange);
+        }
+        context.root.dispatchEvent(new InputEvent("input", { bubbles: true, data: replacementText, inputType: "insertText" }));
+        context.root.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
+  };
+
+  const resetCopyButtonLabel = () => {
+    summaryCopyButton.textContent = "Copy";
+  };
+
   const renderSummarySources = (sources = []) => {
     summarySources.replaceChildren();
     if (!sources.length) {
@@ -769,14 +933,40 @@
     summarySources.classList.remove("hidden");
   };
 
+  const updateSummaryActionVisibility = (mode) => {
+    const isConfirm = mode === "confirm";
+    const isRewriteChoice = mode === "rewrite_choice";
+    const hasOutput = mode === "result" || mode === "error" || mode === "refusal" || mode === "rewrite_fallback";
+
+    summaryActions.classList.toggle("hidden", !(isConfirm || isRewriteChoice || hasOutput));
+    summaryConfirmButton.classList.toggle("hidden", !isConfirm);
+    summaryFactCheckButton.classList.toggle("hidden", !isConfirm);
+    summaryRewriteButton.classList.toggle("hidden", !isConfirm);
+    summaryStyleClearerButton.classList.toggle("hidden", !isRewriteChoice);
+    summaryStyleShorterButton.classList.toggle("hidden", !isRewriteChoice);
+    summaryStyleFormalButton.classList.toggle("hidden", !isRewriteChoice);
+    summaryStyleFriendlyButton.classList.toggle("hidden", !isRewriteChoice);
+    summaryBackButton.classList.toggle("hidden", !isRewriteChoice);
+    summaryCopyButton.classList.toggle("hidden", !hasOutput);
+    summaryCancelButton.classList.toggle("hidden", !(isConfirm || isRewriteChoice || hasOutput));
+  };
+
   const showSummaryBubble = (mode, text, options = {}) => {
     state.summaryMode = mode;
+    state.bubbleOutputText = options.outputText ?? (mode === "result" || mode === "rewrite_fallback" ? text : "");
     summaryBody.textContent = text;
     summaryBubble.classList.remove("hidden");
-    const showActions = mode === "confirm";
-    summaryActions.classList.toggle("hidden", !showActions);
+    summaryBubble.classList.toggle("analysis", mode === "confirm" || mode === "rewrite_choice");
+    updateSummaryActionVisibility(mode);
     summaryConfirmButton.disabled = mode === "loading";
     summaryFactCheckButton.disabled = mode === "loading";
+    summaryRewriteButton.disabled = mode === "loading";
+    summaryStyleClearerButton.disabled = mode === "loading";
+    summaryStyleShorterButton.disabled = mode === "loading";
+    summaryStyleFormalButton.disabled = mode === "loading";
+    summaryStyleFriendlyButton.disabled = mode === "loading";
+    summaryBackButton.disabled = mode === "loading";
+    summaryCopyButton.disabled = !state.bubbleOutputText;
     summaryCancelButton.disabled = mode === "loading";
     renderSummarySources(options.sources ?? []);
     if (options.pendingText !== undefined) {
@@ -785,6 +975,13 @@
     if (options.pendingAction !== undefined) {
       state.pendingSummaryAction = options.pendingAction;
     }
+    if (options.pendingRewriteStyle !== undefined) {
+      state.pendingRewriteStyle = options.pendingRewriteStyle;
+    }
+    if (options.pendingPrompt !== undefined) {
+      state.pendingSummaryPrompt = options.pendingPrompt;
+    }
+    resetCopyButtonLabel();
     freezePet();
   };
 
@@ -792,16 +989,21 @@
     state.summaryMode = "hidden";
     state.pendingSummaryText = "";
     state.pendingSummaryAction = "summarize";
+    state.pendingRewriteStyle = "";
+    state.pendingSummaryPrompt = "";
+    state.bubbleOutputText = "";
     summaryBody.textContent = "";
     summaryBubble.classList.add("hidden");
+    summaryBubble.classList.remove("analysis");
     summaryActions.classList.add("hidden");
     renderSummarySources([]);
+    resetCopyButtonLabel();
     maybeResumePet();
   };
 
-  const requestSummaryFromBackend = (text, mode) => new Promise((resolve) => {
+  const requestSummaryFromBackend = (text, mode, rewriteStyle = "") => new Promise((resolve) => {
     chrome.runtime.sendMessage(
-      { type: "analyzeSelectedText", text, mode },
+      { type: "analyzeSelectedText", text, mode, rewriteStyle },
       (response) => {
         if (chrome.runtime.lastError) {
           resolve({ ok: false, error: chrome.runtime.lastError.message });
@@ -812,7 +1014,7 @@
     );
   });
 
-  const startSummaryRequest = async (mode) => {
+  const startSummaryRequest = async (mode, rewriteStyle = "") => {
     const text = state.pendingSummaryText;
     if (!text) {
       hideSummaryBubble();
@@ -824,18 +1026,43 @@
     }
 
     state.pendingSummaryAction = mode;
-    const loadingText = mode === "fact_check" ? "Fact-checking..." : "Summarizing...";
+    state.pendingRewriteStyle = rewriteStyle;
+    const loadingText = mode === "fact_check"
+      ? "Fact-checking..."
+      : mode === "rewrite"
+        ? "Rewriting..."
+        : "Summarizing...";
     showSummaryBubble("loading", loadingText);
-    const response = await requestSummaryFromBackend(text, mode);
+    const response = await requestSummaryFromBackend(text, mode, rewriteStyle);
     if (!response?.ok || !response.summary) {
       const fallback = mode === "fact_check"
         ? "The bear could not fact-check that text."
+        : mode === "rewrite"
+          ? "The bear could not rewrite that text."
         : "The bear could not summarize that text.";
       showSummaryBubble("error", response?.error || fallback);
       return;
     }
 
-    showSummaryBubble("result", response.summary, { sources: response.sources ?? [] });
+    if (mode === "rewrite") {
+      const applied = applyRewriteToSelection(response.summary);
+      if (applied) {
+        showSummaryBubble("result", "Rewrote the selected text.", {
+          outputText: response.summary
+        });
+        return;
+      }
+
+      showSummaryBubble("rewrite_fallback", response.summary, {
+          outputText: response.summary
+      });
+      return;
+    }
+
+    showSummaryBubble("result", response.summary, {
+      sources: response.sources ?? [],
+      outputText: response.summary
+    });
   };
 
   const prepareSummaryRequest = (rawText) => {
@@ -854,11 +1081,20 @@
     const truncatedNotice = normalized.length > CONFIG.summaryMaxChars
       ? ` I will only use the first ${CONFIG.summaryMaxChars} characters.`
       : "";
+    const promptText = `What should I do with this text?${truncatedNotice}`;
     showSummaryBubble(
       "confirm",
-      `What should I do with this text?${truncatedNotice}`,
-      { pendingText: truncated, pendingAction: "summarize" }
+      promptText,
+      { pendingText: truncated, pendingAction: "summarize", pendingPrompt: promptText }
     );
+  };
+
+  const openRewriteChoices = () => {
+    if (!state.pendingSummaryText) {
+      hideSummaryBubble();
+      return;
+    }
+    showSummaryBubble("rewrite_choice", "How should I rewrite the selected text?");
   };
 
   const openActionMenu = () => {
@@ -912,7 +1148,11 @@
     state.summaryMode = "hidden";
     state.pendingSummaryText = "";
     state.pendingSummaryAction = "summarize";
+    state.pendingRewriteStyle = "";
+    state.pendingSummaryPrompt = "";
+    state.bubbleOutputText = "";
     state.dragSummaryText = "";
+    state.dragSelectionContext = null;
     state.draggingApple = false;
     state.appleVisible = false;
     renderApple();
@@ -2274,6 +2514,7 @@
 
   const clearDraggedSummaryText = () => {
     state.dragSummaryText = "";
+    state.dragSelectionContext = null;
     pet.classList.remove("accepting-drop");
   };
 
@@ -2290,6 +2531,7 @@
     }
 
     state.dragSummaryText = selectedText;
+    state.dragSelectionContext = getEditableSelectionContext();
     event.dataTransfer?.setData("text/plain", selectedText);
     event.dataTransfer.effectAllowed = "copy";
   };
@@ -2446,15 +2688,80 @@
     event.stopPropagation();
     void startSummaryRequest("fact_check");
   });
+  summaryRewriteButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openRewriteChoices();
+  });
+  summaryStyleClearerButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("rewrite", "clearer");
+  });
+  summaryStyleShorterButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("rewrite", "shorter");
+  });
+  summaryStyleFormalButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("rewrite", "more_formal");
+  });
+  summaryStyleFriendlyButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startSummaryRequest("rewrite", "more_friendly");
+  });
+  summaryBackButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    showSummaryBubble(
+      "confirm",
+      state.pendingSummaryPrompt || "What should I do with this text?",
+      {
+        pendingText: state.pendingSummaryText,
+        pendingAction: "summarize",
+        pendingPrompt: state.pendingSummaryPrompt
+      }
+    );
+  });
+  summaryCopyButton.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!state.bubbleOutputText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(state.bubbleOutputText);
+      summaryCopyButton.textContent = "Copied";
+      window.setTimeout(() => {
+        if (summaryCopyButton.isConnected) {
+          resetCopyButtonLabel();
+        }
+      }, 1200);
+    } catch {
+      summaryCopyButton.textContent = "Copy Failed";
+      window.setTimeout(() => {
+        if (summaryCopyButton.isConnected) {
+          resetCopyButtonLabel();
+        }
+      }, 1200);
+    }
+  });
   summaryCancelButton.addEventListener("click", (event) => {
     event.stopPropagation();
     hideSummaryBubble();
   });
   summaryBubble.addEventListener("click", (event) => {
-    if (state.summaryMode === "confirm" || state.summaryMode === "loading") {
+    if (state.summaryMode === "confirm" || state.summaryMode === "rewrite_choice" || state.summaryMode === "loading") {
       return;
     }
-    if (event.target === summaryConfirmButton || event.target === summaryCancelButton) {
+    if (
+      event.target === summaryConfirmButton ||
+      event.target === summaryFactCheckButton ||
+      event.target === summaryRewriteButton ||
+      event.target === summaryStyleClearerButton ||
+      event.target === summaryStyleShorterButton ||
+      event.target === summaryStyleFormalButton ||
+      event.target === summaryStyleFriendlyButton ||
+      event.target === summaryBackButton ||
+      event.target === summaryCopyButton ||
+      event.target === summaryCancelButton
+    ) {
       return;
     }
     hideSummaryBubble();

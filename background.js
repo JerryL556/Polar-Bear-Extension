@@ -7,7 +7,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   const text = typeof message.text === "string" ? message.text.trim() : "";
-  const mode = message.mode === "fact_check" ? "fact_check" : "summarize";
+  const mode = message.mode === "fact_check"
+    ? "fact_check"
+    : message.mode === "rewrite"
+      ? "rewrite"
+      : "summarize";
+  const rewriteStyle = typeof message.rewriteStyle === "string" ? message.rewriteStyle.trim() : "";
   if (!text) {
     sendResponse({ ok: false, error: "No text was provided." });
     return false;
@@ -23,7 +28,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ text, mode }),
+    body: JSON.stringify({ text, mode, rewriteStyle }),
     signal: controller.signal
   })
     .then(async (response) => {

@@ -19,10 +19,13 @@
 - Includes a local-only text summarizer:
   - the user highlights text on a page
   - drags that text onto the bear
-  - the bear asks whether to `Summarize`, `Fact Check`, or `Cancel`
-  - if happiness is `30+`, the bear returns either a short summary or a short fact-check result in a speech bubble
+  - the bear asks whether to `Summarize`, `Fact Check`, `Rewrite`, or `Cancel`
+  - rewrite then asks for `Clearer`, `Shorter`, `More Formal`, or `More Friendly`
+  - if happiness is `30+`, the bear returns either a short summary, a short fact-check result, or rewritten text in a speech bubble
+  - rewritten text is applied directly back into editable selections when possible
   - fact-check results can include clickable source links
   - if happiness is below `30`, the bear refuses to analyze the text
+  - output bubbles include a `Copy` button that copies the result without closing the bubble
 - Includes an action menu opened from a small dot on the bear:
   - `Sleep`
   - `Play Game`

@@ -53,6 +53,21 @@ def build_fact_check_prompt(user_text: str) -> str:
     )
 
 
+def build_rewrite_prompt(user_text: str, rewrite_style: str) -> str:
+    style_map = {
+        "clearer": "Rewrite it to be clearer while preserving the original meaning.",
+        "shorter": "Rewrite it to be shorter while preserving the key meaning.",
+        "more_formal": "Rewrite it to sound more formal while preserving the meaning.",
+        "more_friendly": "Rewrite it to sound more friendly while preserving the meaning.",
+    }
+    style_instruction = style_map.get(rewrite_style, style_map["clearer"])
+    return (
+        f"{style_instruction} "
+        "Return only the rewritten text. Do not add quotation marks, bullet points, explanations, or headings.\n\n"
+        f"Text:\n{user_text}"
+    )
+
+
 def extract_text_and_sources(response) -> tuple[str, list[dict[str, str]]]:
     direct_text = (getattr(response, "output_text", "") or "").strip()
     collected_parts: list[str] = []
@@ -198,7 +213,8 @@ def analyze():
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text", "")).strip()
     mode = str(payload.get("mode", "summarize")).strip()
-    if mode not in {"summarize", "fact_check"}:
+    rewrite_style = str(payload.get("rewriteStyle", "")).strip()
+    if mode not in {"summarize", "fact_check", "rewrite"}:
         mode = "summarize"
 
     if not text:
@@ -210,6 +226,14 @@ def analyze():
     try:
         if mode == "fact_check":
             summary, sources = fact_check_with_web_search(text)
+        elif mode == "rewrite":
+            response = client.responses.create(
+                model=MODEL,
+                input=build_rewrite_prompt(text, rewrite_style),
+                reasoning={"effort": "minimal"},
+                max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+            )
+            summary, sources = extract_text_and_sources(response)
         else:
             response = client.responses.create(
                 model=MODEL,
@@ -224,6 +248,8 @@ def analyze():
     if not summary:
         if mode == "fact_check":
             message = "The model returned no readable fact-check text."
+        elif mode == "rewrite":
+            message = build_error_message(response, "The model returned no readable rewrite text")
         else:
             message = build_error_message(response, "The model returned no readable summary text")
         return jsonify({"error": message}), 502
