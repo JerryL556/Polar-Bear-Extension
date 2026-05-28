@@ -721,8 +721,11 @@
     pendingSummaryAction: "summarize",
     pendingRewriteStyle: "",
     pendingSummaryPrompt: "",
+    pendingImageUrl: "",
+    pendingPayloadKind: "text",
     bubbleOutputText: "",
     dragSummaryText: "",
+    dragImageUrl: "",
     dragSelectionContext: null,
     gameActive: false,
     gameTimerId: null,
@@ -935,11 +938,12 @@
 
   const updateSummaryActionVisibility = (mode) => {
     const isConfirm = mode === "confirm";
+    const isImageConfirm = mode === "image_confirm";
     const isRewriteChoice = mode === "rewrite_choice";
     const hasOutput = mode === "result" || mode === "error" || mode === "refusal" || mode === "rewrite_fallback";
 
-    summaryActions.classList.toggle("hidden", !(isConfirm || isRewriteChoice || hasOutput));
-    summaryConfirmButton.classList.toggle("hidden", !isConfirm);
+    summaryActions.classList.toggle("hidden", !(isConfirm || isImageConfirm || isRewriteChoice || hasOutput));
+    summaryConfirmButton.classList.toggle("hidden", !(isConfirm || isImageConfirm));
     summaryFactCheckButton.classList.toggle("hidden", !isConfirm);
     summaryRewriteButton.classList.toggle("hidden", !isConfirm);
     summaryStyleClearerButton.classList.toggle("hidden", !isRewriteChoice);
@@ -948,7 +952,7 @@
     summaryStyleFriendlyButton.classList.toggle("hidden", !isRewriteChoice);
     summaryBackButton.classList.toggle("hidden", !isRewriteChoice);
     summaryCopyButton.classList.toggle("hidden", !hasOutput);
-    summaryCancelButton.classList.toggle("hidden", !(isConfirm || isRewriteChoice || hasOutput));
+    summaryCancelButton.classList.toggle("hidden", !(isConfirm || isImageConfirm || isRewriteChoice || hasOutput));
   };
 
   const showSummaryBubble = (mode, text, options = {}) => {
@@ -956,8 +960,9 @@
     state.bubbleOutputText = options.outputText ?? (mode === "result" || mode === "rewrite_fallback" ? text : "");
     summaryBody.textContent = text;
     summaryBubble.classList.remove("hidden");
-    summaryBubble.classList.toggle("analysis", mode === "confirm" || mode === "rewrite_choice");
+    summaryBubble.classList.toggle("analysis", mode === "confirm" || mode === "image_confirm" || mode === "rewrite_choice");
     updateSummaryActionVisibility(mode);
+    summaryConfirmButton.textContent = mode === "image_confirm" ? "Describe" : "Summarize";
     summaryConfirmButton.disabled = mode === "loading";
     summaryFactCheckButton.disabled = mode === "loading";
     summaryRewriteButton.disabled = mode === "loading";
@@ -981,6 +986,12 @@
     if (options.pendingPrompt !== undefined) {
       state.pendingSummaryPrompt = options.pendingPrompt;
     }
+    if (options.pendingImageUrl !== undefined) {
+      state.pendingImageUrl = options.pendingImageUrl;
+    }
+    if (options.pendingPayloadKind !== undefined) {
+      state.pendingPayloadKind = options.pendingPayloadKind;
+    }
     resetCopyButtonLabel();
     freezePet();
   };
@@ -991,6 +1002,8 @@
     state.pendingSummaryAction = "summarize";
     state.pendingRewriteStyle = "";
     state.pendingSummaryPrompt = "";
+    state.pendingImageUrl = "";
+    state.pendingPayloadKind = "text";
     state.bubbleOutputText = "";
     summaryBody.textContent = "";
     summaryBubble.classList.add("hidden");
@@ -1001,9 +1014,9 @@
     maybeResumePet();
   };
 
-  const requestSummaryFromBackend = (text, mode, rewriteStyle = "") => new Promise((resolve) => {
+  const requestSummaryFromBackend = ({ text = "", imageUrl = "", mode, rewriteStyle = "" }) => new Promise((resolve) => {
     chrome.runtime.sendMessage(
-      { type: "analyzeSelectedText", text, mode, rewriteStyle },
+      { type: "analyzeDroppedContent", text, imageUrl, mode, rewriteStyle },
       (response) => {
         if (chrome.runtime.lastError) {
           resolve({ ok: false, error: chrome.runtime.lastError.message });
@@ -1016,7 +1029,9 @@
 
   const startSummaryRequest = async (mode, rewriteStyle = "") => {
     const text = state.pendingSummaryText;
-    if (!text) {
+    const imageUrl = state.pendingImageUrl;
+    const isImageRequest = mode === "describe_image";
+    if (!text && !imageUrl) {
       hideSummaryBubble();
       return;
     }
@@ -1029,14 +1044,18 @@
     state.pendingRewriteStyle = rewriteStyle;
     const loadingText = mode === "fact_check"
       ? "Fact-checking..."
+      : mode === "describe_image"
+        ? "Describing image..."
       : mode === "rewrite"
         ? "Rewriting..."
         : "Summarizing...";
     showSummaryBubble("loading", loadingText);
-    const response = await requestSummaryFromBackend(text, mode, rewriteStyle);
+    const response = await requestSummaryFromBackend({ text, imageUrl, mode, rewriteStyle });
     if (!response?.ok || !response.summary) {
       const fallback = mode === "fact_check"
         ? "The bear could not fact-check that text."
+        : mode === "describe_image"
+          ? "The bear could not describe that image."
         : mode === "rewrite"
           ? "The bear could not rewrite that text."
         : "The bear could not summarize that text.";
@@ -1086,6 +1105,30 @@
       "confirm",
       promptText,
       { pendingText: truncated, pendingAction: "summarize", pendingPrompt: promptText }
+    );
+  };
+
+  const prepareImageRequest = (rawImageUrl) => {
+    const normalizedUrl = String(rawImageUrl || "").trim();
+    if (!normalizedUrl) {
+      return;
+    }
+
+    closeActionMenu();
+    if (state.happiness < CONFIG.summaryMinHappiness) {
+      showSummaryBubble("refusal", "Too hungry to think clearly. Feed me before I analyze anything.");
+      return;
+    }
+
+    showSummaryBubble(
+      "image_confirm",
+      "Describe this image in 1-3 sentences?",
+      {
+        pendingText: "",
+        pendingImageUrl: normalizedUrl,
+        pendingPayloadKind: "image",
+        pendingAction: "describe_image"
+      }
     );
   };
 
@@ -1150,8 +1193,11 @@
     state.pendingSummaryAction = "summarize";
     state.pendingRewriteStyle = "";
     state.pendingSummaryPrompt = "";
+    state.pendingImageUrl = "";
+    state.pendingPayloadKind = "text";
     state.bubbleOutputText = "";
     state.dragSummaryText = "";
+    state.dragImageUrl = "";
     state.dragSelectionContext = null;
     state.draggingApple = false;
     state.appleVisible = false;
@@ -2514,6 +2560,7 @@
 
   const clearDraggedSummaryText = () => {
     state.dragSummaryText = "";
+    state.dragImageUrl = "";
     state.dragSelectionContext = null;
     pet.classList.remove("accepting-drop");
   };
@@ -2524,6 +2571,18 @@
       return;
     }
 
+    const imageTarget = event.target instanceof HTMLImageElement ? event.target : null;
+    const imageUrl = imageTarget?.currentSrc || imageTarget?.src || "";
+    if (imageUrl) {
+      state.dragImageUrl = imageUrl;
+      state.dragSummaryText = "";
+      state.dragSelectionContext = null;
+      event.dataTransfer?.setData("text/uri-list", imageUrl);
+      event.dataTransfer?.setData("text/plain", imageUrl);
+      event.dataTransfer.effectAllowed = "copy";
+      return;
+    }
+
     const selectedText = normalizeSummaryText(window.getSelection()?.toString() || "");
     if (!selectedText) {
       clearDraggedSummaryText();
@@ -2531,6 +2590,7 @@
     }
 
     state.dragSummaryText = selectedText;
+    state.dragImageUrl = "";
     state.dragSelectionContext = getEditableSelectionContext();
     event.dataTransfer?.setData("text/plain", selectedText);
     event.dataTransfer.effectAllowed = "copy";
@@ -2541,8 +2601,9 @@
       return;
     }
 
+    const draggedImageUrl = state.dragImageUrl || String(event.dataTransfer?.getData("text/uri-list") || "").trim();
     const draggedText = state.dragSummaryText || normalizeSummaryText(event.dataTransfer?.getData("text/plain") || "");
-    if (!draggedText) {
+    if (!draggedImageUrl && !draggedText) {
       return;
     }
 
@@ -2554,13 +2615,18 @@
   };
 
   const handleSummaryDrop = (event) => {
+    const droppedImageUrl = state.dragImageUrl || String(event.dataTransfer?.getData("text/uri-list") || "").trim();
     const droppedText = state.dragSummaryText || normalizeSummaryText(event.dataTransfer?.getData("text/plain") || "");
     clearDraggedSummaryText();
-    if (!droppedText) {
+    if (!droppedImageUrl && !droppedText) {
       return;
     }
 
     event.preventDefault();
+    if (droppedImageUrl) {
+      prepareImageRequest(droppedImageUrl);
+      return;
+    }
     prepareSummaryRequest(droppedText);
   };
 
@@ -2682,7 +2748,8 @@
   });
   summaryConfirmButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    void startSummaryRequest("summarize");
+    const mode = state.pendingPayloadKind === "image" ? "describe_image" : "summarize";
+    void startSummaryRequest(mode);
   });
   summaryFactCheckButton.addEventListener("click", (event) => {
     event.stopPropagation();

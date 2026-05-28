@@ -2,19 +2,22 @@ const BACKEND_URL = "http://127.0.0.1:4317/analyze";
 const REQUEST_TIMEOUT_MS = 20000;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "analyzeSelectedText") {
+  if (message?.type !== "analyzeDroppedContent") {
     return false;
   }
 
   const text = typeof message.text === "string" ? message.text.trim() : "";
+  const imageUrl = typeof message.imageUrl === "string" ? message.imageUrl.trim() : "";
   const mode = message.mode === "fact_check"
     ? "fact_check"
     : message.mode === "rewrite"
       ? "rewrite"
+      : message.mode === "describe_image"
+        ? "describe_image"
       : "summarize";
   const rewriteStyle = typeof message.rewriteStyle === "string" ? message.rewriteStyle.trim() : "";
-  if (!text) {
-    sendResponse({ ok: false, error: "No text was provided." });
+  if (!text && !imageUrl) {
+    sendResponse({ ok: false, error: "No text or image was provided." });
     return false;
   }
 
@@ -28,7 +31,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ text, mode, rewriteStyle }),
+    body: JSON.stringify({ text, imageUrl, mode, rewriteStyle }),
     signal: controller.signal
   })
     .then(async (response) => {

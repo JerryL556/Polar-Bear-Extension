@@ -15,8 +15,9 @@ load_dotenv(BASE_DIR / ".env")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 PORT = int(os.getenv("SUMMARY_SERVER_PORT", "4317"))
 MAX_TEXT_CHARS = 5000
-SUMMARY_MAX_OUTPUT_TOKENS = 1200
-FACT_CHECK_MAX_OUTPUT_TOKENS = 2000
+SUMMARY_MAX_OUTPUT_TOKENS = 2000
+FACT_CHECK_MAX_OUTPUT_TOKENS = 3200
+IMAGE_DESCRIBE_MAX_OUTPUT_TOKENS = 1600
 
 api_key = os.getenv("OPENAI_API_KEY", "").strip()
 if not api_key:
@@ -65,6 +66,13 @@ def build_rewrite_prompt(user_text: str, rewrite_style: str) -> str:
         f"{style_instruction} "
         "Return only the rewritten text. Do not add quotation marks, bullet points, explanations, or headings.\n\n"
         f"Text:\n{user_text}"
+    )
+
+
+def build_image_describe_prompt() -> str:
+    return (
+        "Describe this image in 1 to 3 neutral sentences. "
+        "Be concise and factual. Do not use markdown, bullet points, or headings."
     )
 
 
@@ -208,23 +216,72 @@ def fact_check_with_web_search(user_text: str) -> tuple[str, list[dict[str, str]
     return summary, sources
 
 
+def describe_image_with_url(image_url: str) -> tuple[str, list[dict[str, str]]]:
+    body = {
+        "model": MODEL,
+        "input": [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": build_image_describe_prompt()},
+                {
+                    "type": "input_image",
+                    "image_url": image_url,
+                    "detail": "low",
+                },
+            ],
+        }],
+        "reasoning": {"effort": "minimal"},
+        "max_output_tokens": IMAGE_DESCRIBE_MAX_OUTPUT_TOKENS,
+    }
+    request_body = json.dumps(body).encode("utf-8")
+    request_obj = Request(
+        "https://api.openai.com/v1/responses",
+        data=request_body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request_obj, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI request failed: HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+
+    summary, sources, _status = extract_text_and_sources_from_json(payload)
+    if not summary:
+        raise RuntimeError(build_json_error_message(payload, "The model returned no readable image description"))
+
+    return summary, sources
+
+
 @app.post("/analyze")
 def analyze():
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text", "")).strip()
+    image_url = str(payload.get("imageUrl", "")).strip()
     mode = str(payload.get("mode", "summarize")).strip()
     rewrite_style = str(payload.get("rewriteStyle", "")).strip()
-    if mode not in {"summarize", "fact_check", "rewrite"}:
+    if mode not in {"summarize", "fact_check", "rewrite", "describe_image"}:
         mode = "summarize"
 
-    if not text:
-        return jsonify({"error": "No text was provided."}), 400
+    if not text and not image_url:
+        return jsonify({"error": "No text or image was provided."}), 400
+    if mode == "describe_image" and not image_url:
+        return jsonify({"error": "No webpage image URL was provided."}), 400
 
-    if len(text) > MAX_TEXT_CHARS:
+    if text and len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
 
     try:
-        if mode == "fact_check":
+        if mode == "describe_image":
+            summary, sources = describe_image_with_url(image_url)
+        elif mode == "fact_check":
             summary, sources = fact_check_with_web_search(text)
         elif mode == "rewrite":
             response = client.responses.create(
@@ -246,7 +303,9 @@ def analyze():
         return jsonify({"error": f"OpenAI request failed: {exc}"}), 500
 
     if not summary:
-        if mode == "fact_check":
+        if mode == "describe_image":
+            message = "The model returned no readable image description."
+        elif mode == "fact_check":
             message = "The model returned no readable fact-check text."
         elif mode == "rewrite":
             message = build_error_message(response, "The model returned no readable rewrite text")
